@@ -1,0 +1,57 @@
+===============================================================================
+            FREESTANDING LOCK-FREE RING BUFFER (KRINGBUF)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KRINGBUF is a zero-dependency, lock-free FIFO byte ring buffer designed for 
+OS kernels, UART serial I/O queues, keyboard scan buffers, and interrupt 
+handler pipelines.
+
+
+2. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. INITIALIZATION
+   - void kringbuf_init(kringbuf_t *rb, uint8_t *buffer, size_t capacity);
+     Binds a ring buffer descriptor to a user-provided byte storage array.
+
+B. DATA OPERATIONS
+   - int kringbuf_push(kringbuf_t *rb, uint8_t byte);
+     Inserts a byte into the buffer. Returns 0 on success, -1 if full.
+
+   - int kringbuf_pop(kringbuf_t *rb, uint8_t *out_byte);
+     Extracts a byte from the buffer. Returns 0 on success, -1 if empty.
+
+   - int kringbuf_peek(const kringbuf_t *rb, uint8_t *out_byte);
+     Inspects the next byte without removing it.
+
+C. STATE QUERIES
+   - int kringbuf_is_empty(const kringbuf_t *rb);
+   - int kringbuf_is_full(const kringbuf_t *rb);
+   - size_t kringbuf_count(const kringbuf_t *rb);
+
+
+3. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "kringbuf.h"
+
+static uint8_t uart_rx_storage[128];
+static kringbuf_t uart_queue;
+
+void uart_interrupt_handler(uint8_t received_char) {
+    /* Push byte from hardware interrupt */
+    kringbuf_push(&uart_queue, received_char);
+}
+
+void kernel_task(void) {
+    kringbuf_init(&uart_queue, uart_rx_storage, sizeof(uart_rx_storage));
+
+    uint8_t ch;
+    if (kringbuf_pop(&uart_queue, &ch) == 0) {
+        /* Process received character */
+    }
+}
+
+===============================================================================

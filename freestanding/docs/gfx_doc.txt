@@ -1,0 +1,83 @@
+===============================================================================
+               FREESTANDING BARE-METAL GRAPHICS (KGFX)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KGFX is a zero-dependency 32-bit ARGB software rendering library designed for 
+OS kernels, bootloader splash screens, VBE/GOP video buffers, and bare-metal 
+embedded display systems.
+
+It operates directly on raw pixel memory buffers without X11, Wayland, SDL,
+or hardware GPU acceleration.
+
+
+2. RENDERING TECHNIQUES & FEATURES
+-------------------------------------------------------------------------------
+- Optimized Double Buffering: Off-screen RAM render target with fast memory swap.
+- Dirty Rectangles: Selective region blitting to update changed UI elements only.
+- Mouse Map & Cursor States: Position, buttons, and stateful cursors (ARROW, HAND, BEAM).
+- Hit Testing: Bounding box collision detection (kgfx_rect_contains).
+
+
+3. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. INITIALIZATION & CLEARING
+   - void kgfx_init(kgfx_fb_t *fb, uint32_t *buffer, uint32_t width, uint32_t height);
+   - void kgfx_clear(kgfx_fb_t *fb, uint32_t color);
+
+B. GRAPHICS PRIMITIVES
+   - void kgfx_draw_pixel(kgfx_fb_t *fb, int x, int y, uint32_t color);
+   - void kgfx_draw_line(kgfx_fb_t *fb, int x0, int y0, int x1, int y1, uint32_t color);
+   - void kgfx_draw_rect(kgfx_fb_t *fb, int x, int y, int w, int h, uint32_t color, int fill);
+   - void kgfx_draw_circle(kgfx_fb_t *fb, int cx, int cy, int r, uint32_t color);
+
+C. TEXT & ASCII RENDERING
+   - void kgfx_draw_char(kgfx_fb_t *fb, int x, int y, char c, uint32_t fg, uint32_t bg);
+   - void kgfx_draw_string(kgfx_fb_t *fb, int x, int y, const char *str, uint32_t fg, uint32_t bg);
+
+D. DOUBLE BUFFERING & DIRTY RECTANGLES
+   - void kgfx_double_buffer_init(kgfx_double_buffer_t *db, uint32_t *front, uint32_t *back, uint32_t w, uint32_t h);
+   - void kgfx_swap_buffers(kgfx_double_buffer_t *db);
+   - void kgfx_add_dirty_rect(kgfx_dirty_list_t *list, int x, int y, int w, int h);
+   - void kgfx_flush_dirty(kgfx_double_buffer_t *db, kgfx_dirty_list_t *list);
+
+E. MOUSE CURSOR & HIT TESTING
+   - void kgfx_draw_cursor(kgfx_fb_t *fb, const kgfx_mouse_t *mouse);
+   - int kgfx_rect_contains(const kgfx_rect_t *rect, int x, int y);
+
+
+4. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "kgfx.h"
+
+static uint32_t front_vga[320 * 240];
+static uint32_t back_ram[320 * 240];
+
+void kernel_gui_demo(void) {
+    kgfx_double_buffer_t db;
+    kgfx_fb_t back_fb;
+    kgfx_mouse_t mouse = { .x = 100, .y = 50, .type = KGFX_CURSOR_CLICKABLE };
+    kgfx_rect_t button = { .x = 80, .y = 40, .w = 100, .h = 30 };
+
+    /* Step 1: Initialize Double Buffer */
+    kgfx_double_buffer_init(&db, front_vga, back_ram, 320, 240);
+    kgfx_init(&back_fb, back_ram, 320, 240);
+
+    /* Step 2: Hit Test Mouse over Button */
+    if (kgfx_rect_contains(&button, mouse.x, mouse.y)) {
+        mouse.type = KGFX_CURSOR_CLICKABLE;
+    }
+
+    /* Step 3: Draw UI & Cursor */
+    kgfx_clear(&back_fb, KGFX_DARKGRAY);
+    kgfx_draw_rect(&back_fb, button.x, button.y, button.w, button.h, KGFX_BLUE, 1);
+    kgfx_draw_cursor(&back_fb, &mouse);
+
+    /* Step 4: Swap Back Buffer to Front Video Memory */
+    kgfx_swap_buffers(&db);
+}
+
+===============================================================================

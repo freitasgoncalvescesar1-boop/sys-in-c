@@ -1,0 +1,65 @@
+===============================================================================
+            FREESTANDING FORMATTED OUTPUT DRIVER (KPRINTF)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KPRINTF is a zero-dependency, freestanding formatted string printer designed for 
+OS kernels, bare-metal microcontrollers, and low-level debugging.
+
+It formats arguments without relying on <stdio.h>, and routes output through
+a configurable hardware character hook (e.g. UART serial, VGA video buffer).
+
+
+2. SPECIFIERS SUPPORTED
+-------------------------------------------------------------------------------
+- %c : Single character
+- %s : Null-terminated string
+- %d / %i : Signed decimal integer
+- %u : Unsigned decimal integer
+- %x : Unsigned hexadecimal integer (lowercase)
+- %X : Unsigned hexadecimal integer (uppercase)
+- %p : Pointer memory address (0x...)
+- %b : Binary representation (0b...)
+- %% : Literal percent character
+
+
+3. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. HOOK ASSIGNMENT
+   - void kset_putchar(kputchar_fn_t putchar_fn);
+     Binds a hardware character output callback (e.g. UART send, VGA write).
+
+B. FORMATTED STREAM PRINTING
+   - int kprintf(const char *fmt, ...);
+   - int kvprintf(const char *fmt, va_list args);
+
+C. MEMORY BUFFER PRINTING
+   - int ksnprintf(char *buf, size_t max_len, const char *fmt, ...);
+   - int kvsnprintf(char *buf, size_t max_len, const char *fmt, va_list args);
+
+
+4. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "kprintf.h"
+
+/* Example hardware character driver (VGA video memory) */
+static void vga_putchar(char c) {
+    volatile uint16_t *vga = (uint16_t *)0xB8000;
+    static int pos = 0;
+    if (c == '\n') pos += 80 - (pos % 80);
+    else vga[pos++] = (0x0F << 8) | c;
+}
+
+void kernel_main(void) {
+    /* Step 1: Bind hardware output hook */
+    kset_putchar(vga_putchar);
+
+    /* Step 2: Print kernel diagnostic logs */
+    kprintf("Kernel Booted. Base: %p | Memory: %d MB | Register: %b\n", 
+            (void*)0x100000, 512, 0b10101100);
+}
+
+===============================================================================

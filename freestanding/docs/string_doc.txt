@@ -1,0 +1,40 @@
+===============================================================================
+            FREESTANDING STRING & UTILITY LIBRARY (KSTRING)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KSTRING is a freestanding, zero-libc string and parsing library for OS kernels, 
+bootloaders, and bare-metal environments, providing complete replacements 
+for <string.h> and integer parsing routines.
+
+
+2. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. STRING MANIPULATION
+   - size_t kstrlen(const char *str);
+   - int kstrcmp(const char *s1, const char *s2);
+   - int kstrncmp(const char *s1, const char *s2, size_t n);
+   - char *kstrcpy(char *dest, const char *src);
+   - char *kstrncpy(char *dest, const char *src, size_t n);
+   - char *kstrchr(const char *str, int c);
+
+B. PARSING & CONVERSION
+   - size_t kitoa(int64_t val, char *buf, int base, int uppercase);
+   - int64_t katoi(const char *str);
+   - uint64_t kstrtoul(const char *str, char **endptr, int base);
+
+
+3. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "kstring.h"
+
+void kernel_cmdline_parse(const char *cmdline) {
+    if (kstrncmp(cmdline, "root=", 5) == 0) {
+        int64_t root_dev = katoi(cmdline + 5);
+    }
+}
+
+===============================================================================

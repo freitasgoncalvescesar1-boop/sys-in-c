@@ -1,0 +1,46 @@
+===============================================================================
+            FREESTANDING MULTICORE SPINLOCKS & ATOMICS (KSPINLOCK)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KSPINLOCK is a zero-dependency, bare-metal hardware synchronization library
+providing spinlocks and atomic integer operations for SMP (Symmetric Multi-Processing)
+OS kernels and microcontrollers without reliance on pthreads or OS runtimes.
+
+
+2. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. SPINLOCK API
+   - void kspinlock_init(kspinlock_t *lock);
+   - void kspinlock_lock(kspinlock_t *lock);
+   - int kspinlock_trylock(kspinlock_t *lock);
+   - void kspinlock_unlock(kspinlock_t *lock);
+
+B. ATOMIC OPERATIONS
+   - uint32_t katomic_add(volatile uint32_t *ptr, uint32_t val);
+   - uint32_t katomic_sub(volatile uint32_t *ptr, uint32_t val);
+
+
+3. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "kspinlock.h"
+
+static kspinlock_t heap_lock;
+static volatile uint32_t global_counter = 0;
+
+void smp_core1_entry(void) {
+    kspinlock_init(&heap_lock);
+
+    /* Atomic operations */
+    katomic_add(&global_counter, 1);
+
+    /* Spinlock critical section */
+    kspinlock_lock(&heap_lock);
+    /* ... Critical hardware / kernel code ... */
+    kspinlock_unlock(&heap_lock);
+}
+
+===============================================================================

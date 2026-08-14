@@ -1,0 +1,42 @@
+===============================================================================
+               FREESTANDING VIRTUAL FILE SYSTEM (KVFS)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KVFS is a zero-dependency in-memory virtual file system designed for OS 
+kernels, RAM disks, initrd images, and bare-metal embedded systems.
+
+
+2. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. INITIALIZATION & FILE CREATION
+   - void kvfs_init(void);
+   - int kvfs_create_file(const char *name, const void *data, size_t size, uint16_t mode);
+
+B. LOOKUP & LISTING
+   - const kvfs_file_t *kvfs_open(const char *name);
+   - void kvfs_list(kvfs_ls_callback_t callback);
+
+
+3. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "kvfs.h"
+
+static const char readme_text[] = "Welcome to utils-in-c OS VFS!";
+
+void ls_print_callback(const char *name, size_t size, uint16_t mode) {
+    /* Print filename and size */
+}
+
+void kernel_vfs_demo(void) {
+    kvfs_init();
+    kvfs_create_file("readme.txt", readme_text, sizeof(readme_text) - 1, 0644);
+
+    /* List files (kls equivalent) */
+    kvfs_list(ls_print_callback);
+}
+
+===============================================================================

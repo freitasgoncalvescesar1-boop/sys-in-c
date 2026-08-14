@@ -1,0 +1,55 @@
+===============================================================================
+            FREESTANDING INTRUSIVE DOUBLY-LINKED LIST (KLIST)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KLIST is a zero-dependency, intrusive doubly-linked list implementation 
+identical to the Linux kernel list API (include/linux/list.h).
+
+It allows any C data structure (e.g. process tasks, device nodes, timer lists)
+to be linked without separate node allocations, using the klist_entry() macro.
+
+
+2. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. INITIALIZATION
+   - void klist_init(klist_node_t *head);
+     Initializes a circular doubly-linked list head pointer.
+
+B. NODE MANIPULATION
+   - void klist_add_head(klist_node_t *head, klist_node_t *new_node);
+   - void klist_add_tail(klist_node_t *head, klist_node_t *new_node);
+   - void klist_remove(klist_node_t *node);
+   - int klist_is_empty(const klist_node_t *head);
+
+C. CONTAINER RETRIEVAL MACRO
+   - klist_entry(ptr, type, member)
+     Calculates the parent structure address from an embedded node pointer.
+
+
+3. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "klist.h"
+
+typedef struct {
+    int task_id;
+    klist_node_t node; /* Embedded list node */
+} task_t;
+
+static klist_node_t task_list;
+
+void kernel_task_scheduler_init(void) {
+    klist_init(&task_list);
+
+    task_t task1 = { .task_id = 1 };
+    klist_add_tail(&task_list, &task1.node);
+
+    /* Retrieve parent struct */
+    klist_node_t *first = task_list.next;
+    task_t *entry = klist_entry(first, task_t, node);
+}
+
+===============================================================================

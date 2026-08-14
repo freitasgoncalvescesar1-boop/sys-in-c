@@ -1,0 +1,81 @@
+===============================================================================
+               FREESTANDING KERNEL MEMORY MANAGER (KMEM)
+===============================================================================
+
+1. OVERVIEW
+-------------------------------------------------------------------------------
+KMEM is a zero-dependency, freestanding memory manager designed for OS kernels,
+bare-metal environments, microkernels, and embedded systems.
+
+It operates on a user-provided memory arena without reliance on C standard
+library functions, OS syscalls (sbrk/mmap), or runtime initialization code.
+
+
+2. ARCHITECTURE
+-------------------------------------------------------------------------------
+- Algorithm: First-fit doubly-linked free list.
+- Alignment: 8-byte default payload alignment.
+- Fragmentation Control: Dynamic block splitting on allocation and 
+  bidirectional coalescing on deallocation.
+- Thread/SMP Safety: Configurable spinlock / interrupt-disable hooks.
+
+
+3. API SPECIFICATION
+-------------------------------------------------------------------------------
+
+A. INITIALIZATION & REGION EXPANSION
+   - void kmem_init(void *heap_start, size_t heap_size);
+     Initializes the primary heap region provided by bootloader or linker script.
+
+   - int kmem_add_region(void *heap_start, size_t heap_size);
+     Attaches secondary physical RAM regions discovered post-boot (e.g. ACPI/e820).
+
+B. CONCURRENCY HOOKS
+   - void kmem_set_locks(void (*lock_fn)(void), void (*unlock_fn)(void));
+     Binds kernel-level spinlock or interrupt-disable routines for SMP safety.
+
+C. ALLOCATION & DEALLOCATION
+   - void *kmalloc(size_t size);
+     Allocates a block of at least 'size' bytes.
+
+   - void *kzalloc(size_t size);
+     Allocates a block of at least 'size' bytes, initialized to zero.
+
+   - void *kmalloc_aligned(size_t size, size_t alignment);
+     Allocates a block with a power-of-two address alignment (e.g. 4096 for page tables).
+
+   - void *krealloc(void *ptr, size_t size);
+     Resizes an existing allocation, copying old data if relocation occurs.
+
+   - void kfree(void *ptr);
+     Deallocates a previously allocated block and coalesces adjacent free nodes.
+
+D. METRICS
+   - size_t kmem_get_free_bytes(void);
+   - size_t kmem_get_used_bytes(void);
+   - size_t kmem_get_total_bytes(void);
+
+
+4. BARE-METAL USAGE EXAMPLE
+-------------------------------------------------------------------------------
+
+#include "kmem.h"
+
+static uint8_t heap_pool[1024 * 1024]; /* 1 MB static RAM region */
+
+void kernel_main(void) {
+    /* Step 1: Initialize heap */
+    kmem_init(heap_pool, sizeof(heap_pool));
+
+    /* Step 2: Allocate page table (4KB aligned) */
+    uint8_t *page_table = kmalloc_aligned(4096, 4096);
+
+    /* Step 3: Allocate zeroed driver buffer */
+    uint32_t *buffer = kzalloc(256 * sizeof(uint32_t));
+
+    /* Step 4: Deallocate */
+    kfree(page_table);
+    kfree(buffer);
+}
+
+===============================================================================
