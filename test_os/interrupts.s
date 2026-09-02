@@ -2,6 +2,7 @@
 .global isr0
 .global isr13
 .global isr14
+.global irq0
 .global irq1
 .global irq12
 .extern isr_handler
@@ -41,6 +42,11 @@ isr13:
 
 isr14:
     push $14
+    jmp isr_common_stub
+
+irq0:
+    push $0
+    push $32
     jmp isr_common_stub
 
 irq1:

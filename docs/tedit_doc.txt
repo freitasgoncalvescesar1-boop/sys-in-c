@@ -1,0 +1,116 @@
+
+===============================================================================
+       TEDIT - VISUAL SYNTAX CODE EDITOR & EMBEDDED LIVE WEB SERVER
+===============================================================================
+
+1. OVERVIEW & PHILOSOPHY
+-------------------------------------------------------------------------------
+TEDIT is a lightweight, zero-dependency, full-screen Terminal User Interface 
+(TUI) code editor and development environment written in pure C.
+
+It combines the simplicity and ease of classic nano/micro editors with the 
+productivity of modern IDEs: real-time multi-language syntax highlighting, 
+dynamic line-number gutters, smart auto-indentation, horizontal text sliding, 
+multi-level undo history, and an embedded HTTP web server for instant live 
+browser preview.
+
+Designed specifically for seamless operation across both Mobile (Termux/Android)
+and Desktop/Server Linux environments.
+
+
+2. ARCHITECTURE & RENDERING ENGINE
+-------------------------------------------------------------------------------
+A. DYNAMIC LINE-NUMBER GUTTER & RESPONSIVE LAYOUT
+   - Automatically calculates line count digits (e.g. " 12 │ ") and adjusts the 
+     gutter width dynamically to maximize text editing area.
+   - Highlights the current line number in bold yellow for quick orientation.
+   - Automatically resizes frames on terminal dimension changes (TIOCGWINSZ).
+
+B. BIDIRECTIONAL SMOOTH SCROLLING (SCROLL_X & SCROLL_Y)
+   - Vertical Scrolling (scroll_y): Smoothly scrolls long files with zero frame 
+     lag and instant page navigation (PgUp/PgDn/Home/End).
+   - Horizontal Sliding (scroll_x): When lines exceed terminal width, the text 
+     viewport slides horizontally so the cursor is always visible.
+
+C. SMART AUTO-INDENTATION
+   - Pressing ENTER analyzes leading whitespace from the current line and 
+     preserves indentation on the new line.
+   - If the line ends with an opening block symbol ('{', ':', '(', '['), it 
+     automatically appends +4 indentation spaces.
+
+D. RESILIENT MULTI-LEVEL UNDO STACK (CTRL + Z)
+   - Employs a 32-level circular snapshot ring buffer tracking lines, line count, 
+     and exact cursor coordinates, allowing instant error recovery.
+
+
+3. SYNTAX HIGHLIGHTING & LANGUAGE RECOGNITION
+-------------------------------------------------------------------------------
+TEDIT automatically detects language lexers by file extension:
+
+A. C / C++ (.c, .h, .cpp)
+   - Keywords : int, char, void, float, struct, typedef, return, if, while, etc.
+   - Preprocessor directives : #include, #define, #ifdef, #ifndef, #endif
+   - Strings, character literals, and line comments (//)
+
+B. JAVASCRIPT / JSON / TYPESCRIPT (.js, .json, .ts)
+   - Keywords : function, let, var, const, async, await, class, import, export
+   - Numeric constants, strings, booleans, and comments
+
+C. PYTHON (.py)
+   - Keywords : def, class, return, if, elif, else, for, while, in, with, try
+   - Strings, f-strings, and hash comments (#)
+
+D. SHELL SCRIPT (.sh, .bash)
+   - Commands, variable expansions, strings, and comments (#)
+
+E. HTML / XML (.html, .htm, .xml)
+   - Tag delimiters (<tag ...>), attributes, and string values
+
+
+4. KEYBOARD SHORTCUTS & NAVIGATION (MOBILE & PC)
+-------------------------------------------------------------------------------
+All primary commands use single-touch CTRL combinations that never conflict with 
+standard typing:
+
+A. FILE & SERVER CONTROLS
+   - Ctrl + S       : Save file to disk
+   - Ctrl + X       : Save file and exit editor
+   - Ctrl + W / F5  : Launch / open live embedded HTTP server (port 8080)
+   - Ctrl + E       : Open integrated shell / command terminal
+
+B. EDITING & RECOVERY
+   - Ctrl + Z       : Undo last action (multi-level undo stack)
+   - Ctrl + D       : Duplicate current line
+   - Ctrl + K       : Delete / kill current line
+   - TAB            : Insert 4-space indentation
+   - ENTER          : Smart newline with auto-indentation
+
+C. SEARCH, NAVIGATION & AUDIT
+   - Ctrl + F       : Search term / jump to next match
+   - Ctrl + R       : Interactive search and replace (all occurrences)
+   - Ctrl + G       : Jump directly to line number (1 to N)
+   - Ctrl + P       : File statistics modal (words, lines, characters, KB size)
+   - Ctrl + O / F1  : Display help & shortcuts guide modal
+   - Ctrl + T       : Cycle color themes (Neon Purple, Matrix Green, Cyber Cyan, 
+                      Dracula Gold, Blood Crimson)
+   - ESC            : Clear active search highlight / cancel notifications
+
+
+5. EMBEDDED REAL-TIME WEB SERVER (PORT 8080)
+-------------------------------------------------------------------------------
+Pressing Ctrl + W (or F5) triggers an in-memory POSIX background web server:
+- Automatically binds to port 8080 (or searches 8081-8090 if busy).
+- Automatically launches the system browser:
+  * On Android / Termux : Dispatches via 'termux-open-url http://localhost:8080/'
+  * On Desktop Linux    : Dispatches via 'xdg-open http://localhost:8080/'
+- Serves HTML, CSS, JavaScript, JSON, and images with automatic MIME headers.
+- Saving edits (Ctrl + S) immediately reflects on the live server upon refresh.
+
+
+6. CLIPBOARD & SYSTEM INTEGRATION
+-------------------------------------------------------------------------------
+- Bracketed Paste Mode (\033[200~): Pastes large blocks of code without typing delay.
+- Telemetry Integration: Registers active process and logging directly into the 
+  shared memory IPC daemon (libutilipc.so).
+
+===============================================================================

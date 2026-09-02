@@ -1,0 +1,2 @@
+Gravado com sucesso pelo 'with open()' do pythont 6.0!
+Arquivo fechado automaticamente sem memory leak.

@@ -1,0 +1,53 @@
+
+===============================================================================
+       KRYPT 2.0 - CHACHA20 + HMAC VAULT, DIRECTORY PACKER & AUTO-SHREDDER
+===============================================================================
+
+1. OVERVIEW & PHILOSOPHY
+-------------------------------------------------------------------------------
+KRYPT 2.0 is a standalone, authenticated file and directory encryption vault 
+written in pure ANSI C.
+
+It combines ChaCha20 stream encryption, 50,000-round PBKDF2-like SHA-256 key 
+derivation, and HMAC-SHA256 authenticated integrity verification (AEAD) with 
+support for full directory trees and military-grade origin shredding via rmd.
+
+
+2. CRYPTOGRAPHIC PIPELINE
+-------------------------------------------------------------------------------
+- Cipher               : ChaCha20 (256-bit key, 96-bit nonce, 32-bit block counter)
+- Key Derivation       : 50,000 rounds SHA-256 with 128-bit cryptographic salt (/dev/urandom)
+- Integrity / MAC      : HMAC-SHA256 (32 bytes) over ciphertext (Encrypt-then-MAC)
+- Vault Validation     : Verifies HMAC signature before touching disk on restore
+
+
+3. DIRECTORY TREE ARCHIVING
+-------------------------------------------------------------------------------
+KRYPT 2.0 natively serializes entire directory structures:
+- Preserves relative paths and directory branch hierarchies.
+- Stores POSIX file permissions (mode).
+- Packs everything into a single encrypted .kr vault.
+- Restores all folders and files automatically on decryption.
+
+
+4. AUTO-SHRED INTEGRATION (-s / --shred)
+-------------------------------------------------------------------------------
+When passed the -s / --shred flag:
+- Encrypts target file/folder and verifies HMAC output.
+- Dispatches 'rmd -r -f <target>' to invoke the 7-stage military crypto-shredder 
+  (O_DIRECT, AES-256, mlock, dir sync), permanently destroying the unencrypted 
+  origin data without prompting.
+
+
+5. CLI USAGE & EXAMPLES
+-------------------------------------------------------------------------------
+- Encrypt Single File:
+  $ krypt -e secret.txt
+
+- Encrypt Directory Tree & Shred Origin:
+  $ krypt -e ./my_project/ -s
+
+- Decrypt Vault to Specific Folder:
+  $ krypt -d my_project.kr -o ./restored/
+
+===============================================================================

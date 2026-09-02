@@ -10,6 +10,7 @@ size_t kstrlen(const char *str) {
 
 /* String comparison */
 int kstrcmp(const char *s1, const char *s2) {
+    if (!s1 || !s2) return s1 ? 1 : (s2 ? -1 : 0);
     while (*s1 && (*s1 == *s2)) {
         s1++;
         s2++;
@@ -19,6 +20,7 @@ int kstrcmp(const char *s1, const char *s2) {
 
 /* Length-bounded string comparison */
 int kstrncmp(const char *s1, const char *s2, size_t n) {
+    if (!s1 || !s2 || n == 0) return 0;
     while (n && *s1 && (*s1 == *s2)) {
         s1++;
         s2++;
@@ -30,6 +32,7 @@ int kstrncmp(const char *s1, const char *s2, size_t n) {
 
 /* String copy */
 char *kstrcpy(char *dest, const char *src) {
+    if (!dest || !src) return dest;
     char *d = dest;
     while ((*d++ = *src++));
     return dest;
@@ -37,6 +40,7 @@ char *kstrcpy(char *dest, const char *src) {
 
 /* Length-bounded string copy */
 char *kstrncpy(char *dest, const char *src, size_t n) {
+    if (!dest || !src || n == 0) return dest;
     size_t i;
     for (i = 0; i < n && src[i] != '\0'; i++) {
         dest[i] = src[i];
@@ -47,13 +51,74 @@ char *kstrncpy(char *dest, const char *src, size_t n) {
     return dest;
 }
 
+/* String concatenation */
+char *kstrcat(char *dest, const char *src) {
+    if (!dest || !src) return dest;
+    char *d = dest;
+    while (*d) d++;
+    while ((*d++ = *src++));
+    return dest;
+}
+
+/* Length-bounded string concatenation */
+char *kstrncat(char *dest, const char *src, size_t n) {
+    if (!dest || !src || n == 0) return dest;
+    char *d = dest;
+    while (*d) d++;
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        d[i] = src[i];
+    }
+    d[i] = '\0';
+    return dest;
+}
+
 /* Character search */
 char *kstrchr(const char *str, int c) {
+    if (!str) return NULL;
     while (*str != (char)c) {
         if (!*str) return NULL;
         str++;
     }
     return (char *)str;
+}
+
+/* Substring search */
+char *kstrstr(const char *haystack, const char *needle) {
+    if (!haystack || !needle) return NULL;
+    if (!*needle) return (char *)haystack;
+
+    size_t needle_len = kstrlen(needle);
+    for (; *haystack; haystack++) {
+        if (*haystack == *needle && kstrncmp(haystack, needle, needle_len) == 0) {
+            return (char *)haystack;
+        }
+    }
+    return NULL;
+}
+
+/* Raw memory comparison */
+int kmemcmp(const void *s1, const void *s2, size_t n) {
+    const uint8_t *p1 = (const uint8_t *)s1;
+    const uint8_t *p2 = (const uint8_t *)s2;
+    for (size_t i = 0; i < n; i++) {
+        if (p1[i] != p2[i]) return (int)p1[i] - (int)p2[i];
+    }
+    return 0;
+}
+
+/* Safe overlapping memory move */
+void *kmemmove(void *dest, const void *src, size_t n) {
+    uint8_t *d = (uint8_t *)dest;
+    const uint8_t *s = (const uint8_t *)src;
+    if (d == s || n == 0) return dest;
+
+    if (d < s) {
+        for (size_t i = 0; i < n; i++) d[i] = s[i];
+    } else {
+        for (size_t i = n; i > 0; i--) d[i - 1] = s[i - 1];
+    }
+    return dest;
 }
 
 /* Integer to string conversion */
@@ -62,7 +127,7 @@ size_t kitoa(int64_t val, char *buf, int base, int uppercase) {
     static const char digits_upper[] = "0123456789ABCDEF";
     const char *digits = uppercase ? digits_upper : digits_lower;
 
-    if (base < 2 || base > 16) return 0;
+    if (base < 2 || base > 16 || !buf) return 0;
 
     char temp[68];
     size_t temp_pos = 0;

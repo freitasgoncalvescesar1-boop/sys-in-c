@@ -1,0 +1,2 @@
+PYTHONT 1.0-RELEASE COMPILADO COM SUCESSO!
+Executando a velocidade nativa de maquina sem overhead.

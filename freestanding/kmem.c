@@ -2,21 +2,18 @@
 
 #define ALIGN8(x) (((x) + 7) & ~7)
 
-/* Memory block descriptor */
 typedef struct kmem_block {
-    size_t size;               /* Payload capacity */
-    int is_free;               /* Free state flag */
-    struct kmem_block *next;   /* Next heap node */
-    struct kmem_block *prev;   /* Previous heap node */
+    size_t size;
+    int is_free;
+    struct kmem_block *next;
+    struct kmem_block *prev;
 } kmem_block_t;
 
 #define BLOCK_HEADER_SIZE ALIGN8(sizeof(kmem_block_t))
 
-/* Global heap state */
 static kmem_block_t *head_block = NULL;
 static size_t total_heap_bytes = 0;
 
-/* Concurrency hooks */
 static void (*kmem_lock_hook)(void) = NULL;
 static void (*kmem_unlock_hook)(void) = NULL;
 
@@ -28,28 +25,75 @@ static inline void unlock_heap(void) {
     if (kmem_unlock_hook) kmem_unlock_hook();
 }
 
-/* Raw memory copy */
+/* Cópia acelerada de memória via instrução nativa de hardware */
 void *kmemcpy(void *dest, const void *src, size_t n) {
     uint8_t *d = (uint8_t *)dest;
     const uint8_t *s = (const uint8_t *)src;
-    for (size_t i = 0; i < n; i++) d[i] = s[i];
+
+#if defined(__x86_64__) || defined(__i386__)
+    if (n >= 4) {
+        size_t dwords = n / 4;
+        __asm__ __volatile__ (
+            "cld\n"
+            "rep movsl\n"
+            : "+D"(d), "+S"(s), "+c"(dwords)
+            : : "memory"
+        );
+        n %= 4;
+    }
+#else
+    while (n >= 4 && (((uintptr_t)d & 3) == 0) && (((uintptr_t)s & 3) == 0)) {
+        *(uint32_t *)d = *(const uint32_t *)s;
+        d += 4;
+        s += 4;
+        n -= 4;
+    }
+#endif
+
+    while (n--) {
+        *d++ = *s++;
+    }
     return dest;
 }
 
-/* Raw memory fill */
+/* Preenchimento acelerado de memória */
 void *kmemset(void *s, int c, size_t n) {
     uint8_t *p = (uint8_t *)s;
-    for (size_t i = 0; i < n; i++) p[i] = (uint8_t)c;
+    uint8_t byte_val = (uint8_t)c;
+
+#if defined(__x86_64__) || defined(__i386__)
+    if (n >= 4) {
+        uint32_t val32 = ((uint32_t)byte_val << 24) | ((uint32_t)byte_val << 16) | ((uint32_t)byte_val << 8) | byte_val;
+        size_t dwords = n / 4;
+        __asm__ __volatile__ (
+            "cld\n"
+            "rep stosl\n"
+            : "+D"(p), "+c"(dwords)
+            : "a"(val32)
+            : "memory"
+        );
+        n %= 4;
+    }
+#else
+    uint32_t val32 = ((uint32_t)byte_val << 24) | ((uint32_t)byte_val << 16) | ((uint32_t)byte_val << 8) | byte_val;
+    while (n >= 4 && (((uintptr_t)p & 3) == 0)) {
+        *(uint32_t *)p = val32;
+        p += 4;
+        n -= 4;
+    }
+#endif
+
+    while (n--) {
+        *p++ = byte_val;
+    }
     return s;
 }
 
-/* Lock hooks assignment */
 void kmem_set_locks(void (*lock_fn)(void), void (*unlock_fn)(void)) {
     kmem_lock_hook = lock_fn;
     kmem_unlock_hook = unlock_fn;
 }
 
-/* Primary region initialization */
 void kmem_init(void *heap_start, size_t heap_size) {
     if (!heap_start || heap_size < (BLOCK_HEADER_SIZE + 32)) return;
 
@@ -61,7 +105,6 @@ void kmem_init(void *heap_start, size_t heap_size) {
     head_block->prev = NULL;
 }
 
-/* Secondary region attachment */
 int kmem_add_region(void *heap_start, size_t heap_size) {
     if (!heap_start || heap_size < (BLOCK_HEADER_SIZE + 32)) return -1;
 
@@ -86,7 +129,6 @@ int kmem_add_region(void *heap_start, size_t heap_size) {
     return 0;
 }
 
-/* First-fit allocation */
 void *kmalloc(size_t size) {
     if (size == 0 || !head_block) return NULL;
 
@@ -97,7 +139,6 @@ void *kmalloc(size_t size) {
 
     while (curr) {
         if (curr->is_free && curr->size >= required_space) {
-            /* Block splitting */
             if (curr->size >= required_space + BLOCK_HEADER_SIZE + 32) {
                 kmem_block_t *new_block = (kmem_block_t *)((uint8_t *)curr + BLOCK_HEADER_SIZE + required_space);
                 new_block->size = curr->size - required_space - BLOCK_HEADER_SIZE;
@@ -113,7 +154,7 @@ void *kmalloc(size_t size) {
             curr->is_free = 0;
             uint8_t *payload = (uint8_t *)curr + BLOCK_HEADER_SIZE + sizeof(kmem_block_t *);
             ((kmem_block_t **)payload)[-1] = curr;
-            
+
             unlock_heap();
             return (void *)payload;
         }
@@ -124,29 +165,27 @@ void *kmalloc(size_t size) {
     return NULL;
 }
 
-/* Zeroed allocation */
 void *kzalloc(size_t size) {
     void *ptr = kmalloc(size);
     if (ptr) kmemset(ptr, 0, size);
     return ptr;
 }
 
-/* Aligned allocation */
 void *kmalloc_aligned(size_t size, size_t alignment) {
     if (size == 0 || alignment == 0) return NULL;
     if ((alignment & (alignment - 1)) != 0) return NULL;
 
     lock_heap();
     size_t alloc_size = ALIGN8(size) + alignment + sizeof(kmem_block_t *) + BLOCK_HEADER_SIZE;
-    
     unlock_heap();
+
     uint8_t *raw_ptr = (uint8_t *)kmalloc(alloc_size);
     if (!raw_ptr) return NULL;
 
     lock_heap();
     uintptr_t raw_addr = (uintptr_t)raw_ptr;
     uintptr_t aligned_addr = (raw_addr + sizeof(kmem_block_t *) + alignment - 1) & ~(alignment - 1);
-    
+
     uint8_t *aligned_ptr = (uint8_t *)aligned_addr;
     kmem_block_t *original_block = ((kmem_block_t **)raw_ptr)[-1];
     ((kmem_block_t **)aligned_ptr)[-1] = original_block;
@@ -155,7 +194,6 @@ void *kmalloc_aligned(size_t size, size_t alignment) {
     return (void *)aligned_ptr;
 }
 
-/* Memory release and block coalescing */
 void kfree(void *ptr) {
     if (!ptr) return;
 
@@ -168,14 +206,12 @@ void kfree(void *ptr) {
 
     block->is_free = 1;
 
-    /* Forward coalescing */
     if (block->next && block->next->is_free) {
         block->size += BLOCK_HEADER_SIZE + block->next->size;
         block->next = block->next->next;
         if (block->next) block->next->prev = block;
     }
 
-    /* Backward coalescing */
     if (block->prev && block->prev->is_free) {
         block->prev->size += BLOCK_HEADER_SIZE + block->size;
         block->prev->next = block->next;
@@ -185,7 +221,6 @@ void kfree(void *ptr) {
     unlock_heap();
 }
 
-/* Block reallocation */
 void *krealloc(void *ptr, size_t size) {
     if (!ptr) return kmalloc(size);
     if (size == 0) {
@@ -208,7 +243,6 @@ void *krealloc(void *ptr, size_t size) {
     return new_ptr;
 }
 
-/* Free bytes counter */
 size_t kmem_get_free_bytes(void) {
     size_t free_bytes = 0;
     lock_heap();
@@ -221,7 +255,6 @@ size_t kmem_get_free_bytes(void) {
     return free_bytes;
 }
 
-/* Used bytes counter */
 size_t kmem_get_used_bytes(void) {
     size_t used_bytes = 0;
     lock_heap();
@@ -234,7 +267,6 @@ size_t kmem_get_used_bytes(void) {
     return used_bytes;
 }
 
-/* Total heap capacity */
 size_t kmem_get_total_bytes(void) {
     return total_heap_bytes;
 }

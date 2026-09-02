@@ -1,0 +1,42 @@
+
+===============================================================================
+     SIMPLEHOST 2.5 - MODULAR MULTITHREADED HTTP SERVER & SECURITY ENGINE
+===============================================================================
+
+1. OVERVIEW & PHILOSOPHY
+-------------------------------------------------------------------------------
+SIMPLEHOST 2.5 is a modular, zero-dependency, high-performance HTTP/1.1 web 
+server, file explorer, and upload hub written in modular ANSI C.
+
+It features custom, beautiful 404 (Not Found) and 403 (Forbidden) error pages,
+multi-threaded request handling via POSIX threads, dynamic directory explorers, 
+and strict sanitization shields.
+
+
+2. MODULAR ARCHITECTURE
+-------------------------------------------------------------------------------
+- src/simplehost/server.h     : Central definitions, prototypes and MIME mapping.
+- src/simplehost/security.c   : Canonical path checks, URL decoding, and multipart parser.
+- src/simplehost/http_pages.c : Dynamic HTML generation (Custom 404, Explorer, Index).
+- src/simplehost/simplehost.c : Sockets, thread pooling, and HTTP routing.
+
+
+3. CUSTOM 404 (NOT FOUND) & ERROR SHIELD
+-------------------------------------------------------------------------------
+When an unmapped file or missing path is requested (e.g. /foto_antiga.png):
+- Returns an HTTP 404 status code with a Catppuccin Dark themed page.
+- Displays: "O arquivo [o arquivo não encontrado] não foi achado no servidor."
+- Includes one-click action buttons:
+  * "🏠 Voltar para a Página Inicial"
+  * "📂 Explorar Arquivos (/uploads)"
+
+
+4. COMPILATION & LAUNCH
+-------------------------------------------------------------------------------
+Compile with all modules combined:
+  $ gcc -Wall -Wextra -O2 -fPIC src/simplehost/simplehost.c src/simplehost/http_pages.c src/simplehost/security.c -o simplehost -L. -lutilipc -Wl,-rpath,. -lpthread
+
+Launch:
+  $ ./simplehost 8080
+
+===============================================================================

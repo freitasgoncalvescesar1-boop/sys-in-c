@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <time.h>
+#include <signal.h>
 #include "../libutilipc/utilipc.h"
 
 #define SAMPLES 26
@@ -29,6 +30,14 @@ static int sample_count = 0;
 
 static unsigned long long prev_idle = 0;
 static unsigned long long prev_total = 0;
+
+static void cleanup_and_exit(int sig) {
+    (void)sig;
+    printf("\033[?25h\033[0m\n"); // Restaura o cursor e cores
+    fflush(stdout);
+    utilipc_close();
+    exit(0);
+}
 
 static double get_cpu_load(void) {
     FILE *fp = fopen("/proc/stat", "r");
@@ -205,22 +214,18 @@ static void render_plot(void) {
     printf("%s[ cpuplot - Real-Time System Dashboard ]%s\033[K\n", COLOR_TITLE, COLOR_RESET);
     printf("%s========================================================%s\033[K\n", COLOR_TITLE, COLOR_RESET);
 
-    // CPU Line
     printf("  %sCPU [%05.1f%%] (%d Cores):%s ", COLOR_CPU, current_cpu, cpu_cores, COLOR_RESET);
     for (int i = 0; i < sample_count; i++) printf("%s%s%s", COLOR_CPU, val_to_spark(cpu_history[i]), COLOR_RESET);
     printf("\033[K\n");
 
-    // RAM Line
     printf("  %sRAM [%05.1f%%] (%.1fG/%.1fG):%s ", COLOR_RAM, current_ram, used_mb / 1024.0, total_mb / 1024.0, COLOR_RESET);
     for (int i = 0; i < sample_count; i++) printf("%s%s%s", COLOR_RAM, val_to_spark(ram_history[i]), COLOR_RESET);
     printf("\033[K\n");
 
-    // SWAP Line
     printf("  %sSWP [%05.1f%%] (%.1fG/%.1fG):%s ", COLOR_SWAP, current_swap, swap_used_mb / 1024.0, swap_total_mb / 1024.0, COLOR_RESET);
     for (int i = 0; i < sample_count; i++) printf("%s%s%s", COLOR_SWAP, val_to_spark(swap_history[i]), COLOR_RESET);
     printf("\033[K\n");
 
-    // Latency Line
     if (net_lat >= 0) {
         printf("  %sNET [%05.1f ms] (Cloudflare):%s ", COLOR_NET, net_lat, COLOR_RESET);
     } else {
@@ -242,13 +247,23 @@ static void render_plot(void) {
     utilipc_write_status(used_mb, total_mb, current_cpu / 100.0, log_msg);
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+    if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("Usage: cpuplot\n");
+        printf("Real-time terminal graph monitor for CPU, RAM, SWAP and Network latency.\n");
+        return 0;
+    }
+
+    signal(SIGINT, cleanup_and_exit);
+    signal(SIGTERM, cleanup_and_exit);
+    atexit((void (*)(void))cleanup_and_exit);
+
     utilipc_init();
 
     get_cpu_load();
     usleep(100000);
 
-    printf("\033[?25l\033[H\033[J"); // Esconde o cursor e limpa tela
+    printf("\033[?25l\033[H\033[J");
     while (1) {
         render_plot();
         usleep(500000);

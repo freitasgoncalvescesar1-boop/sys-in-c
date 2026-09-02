@@ -1,0 +1,68 @@
+name: sys-in-c CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+    - name: Checkout Código-Fonte
+      uses: actions/checkout@v3
+
+    - name: Configurar Dependências de Compilação
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential ${{ matrix.compiler }} libpthread-stubs0-dev
+
+    - name: Compilar Todo o Projeto
+      run: |
+        make clean
+        make CC=${{ matrix.compiler }}
+
+    - name: Testar Execução de Utilitários Principais
+      run: |
+        echo "=== 1. Testando Calc ==="
+        ./calc "10 + 20 * 2"
+
+        echo "=== 2. Testando Base64 ==="
+        ./b64 -e "sys-in-c"
+        ./b64 -d "c3lzLWluLWM="
+
+        echo "=== 3. Testando Hashcalc ==="
+        ./hashcalc -s "sys-in-c test"
+
+        echo "=== 4. Testando SNC ==="
+        ./snc 192.168.1.100/24
+
+        echo "=== 5. Testando Pythont ==="
+        echo 'print("Hello do GitHub Actions via Pythont!", 40 + 2)' > ci_test.py
+        ./pythont ci_test.py
+        if [ -f examples/exemplo.py ]; then ./pythont examples/exemplo.py; fi
+        if [ -f examples/exemplo2.py ]; then ./pythont examples/exemplo2.py; fi
+
+        echo "=== 6. Testando Low-Utils (whoami, chmod, magic, stat, tree, df, which) ==="
+        ./whoami -s
+        ./whoami -uo
+        ./chmod 755 Makefile
+        ./magic Makefile
+        ./stat Makefile
+        ./tree -L 2
+        ./df
+        ./which make
+        ./which sh
+
+        echo "=== 7. Testando Bytebeat ==="
+        ./bytebeat -p 2 -d 2 -o test_symphony.wav
+        ./bytebeat -p 9 -d 2 -o test_snes.wav
+
+        echo "=== 8. Testando Bench & Diskbench ==="
+        ./bench
+        ./diskbench

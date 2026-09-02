@@ -26,6 +26,9 @@ static void print_general_help(void) {
     printf("  bench      - Hardware micro-benchmark for CPU MOPs and RAM MB/s\n");
     printf("  get-info   - Hardware intelligence for phones, PC parts & bottleneck shell\n");
     printf("  netclip    - P2P local network clipboard & file transfer (Termux <-> PC)\n");
+    printf("  snc        - IPv4 Subnet Calculator & CIDR analyzer with detailed binary table\n");
+    printf("  jsonview   - JSON syntax highlighter, validator & shorthand converter\n");
+    printf("  speedtest  - Internet speed (Mbps download) & latency/jitter test via CDN\n");
     printf("  utils-help - Display help guide for commands\n");
     printf("======================\n");
 }

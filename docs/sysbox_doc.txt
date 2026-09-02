@@ -1,0 +1,46 @@
+
+===============================================================================
+       SYSBOX - RETRO-MODERN BIOS SETUP UTILITY & VIRTUAL PC DESKTOP (v6.0)
+===============================================================================
+
+1. OVERVIEW & PHILOSOPHY
+-------------------------------------------------------------------------------
+SYSBOX is the central Terminal User Interface (TUI) dashboard, BIOS setup, and 
+program launcher for the sys-in-c operating system suite.
+
+It merges the nostalgic feel of 1990s Award/AMI BIOS utilities with a modern,
+eye-pleasing color palette system and a full Virtual PC Desktop monitor.
+
+
+2. THEME SYSTEM & CEILING ("TETO") COLORS (8 PALETTES)
+-------------------------------------------------------------------------------
+Press 'T' at any time in the BIOS menu to cycle through 8 distinct color themes:
+1. 🌸 Sakura Rose       - Soft Rosewater Header with Mint Highlights
+2. 🍵 Matcha Emerald    - Emerald Mint Header with Peach Accents
+3. 🌌 Lavender Dream    - Catppuccin Purple Header with Rosewater
+4. 🍑 Sunbeam Peach     - Warm Golden Header with Amber Contrast
+5. ☁️ Cyber Sky         - Cool Azure Header with Cyan Styling
+6. ⚡ Cyberpunk Neon    - Vibrant Yellow Header with Electric Blue Text
+7. ❄️ Nord Frost        - Polar Ice Blue Header with Arctic Navy Text
+8. 🩸 Blood Crimson     - Deep Crimson Red Header with Obsidian Styling
+
+
+3. VIRTUAL DESKTOP SIMULATOR (GUI TAB)
+-------------------------------------------------------------------------------
+- Full 2D Interactive Mouse Cursor (🖰) controlled via Arrow keys or clicks.
+- Real-time procedural harmonic Windows XP Bliss wallpaper generation.
+- Integrated runtime runners for C (GCC), Python (pythont 1.0), and Java.
+- Switch wallpapers on-the-fly with the 'W' key.
+
+
+4. CONTROLS & SHORTCUTS
+-------------------------------------------------------------------------------
+- Left / Right Arrow (or TAB) : Switch category tabs
+- Up / Down Arrow             : Move selection cursor
+- Enter                       : Execute selected tool
+- 'A' / 'a'                   : Pass custom arguments to selected tool
+- 'T' / 't'                   : Cycle top header/ceiling theme colors
+- 'W' / 'w'                   : Cycle desktop wallpapers (in GUI mode)
+- 'Q' / 'q' or ESC            : Exit / Return to shell
+
+===============================================================================

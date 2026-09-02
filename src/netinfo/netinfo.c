@@ -10,7 +10,16 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <time.h>
+#include <signal.h>
 #include "../libutilipc/utilipc.h"
+
+static void cleanup_and_exit(int sig) {
+    (void)sig;
+    printf("\033[?25h\033[0m\n");
+    fflush(stdout);
+    utilipc_close();
+    exit(0);
+}
 
 static void fetch_public_ip(char *out_ip, size_t max_len) {
     strncpy(out_ip, "Offline / Unavailable", max_len);
@@ -155,7 +164,10 @@ static double measure_tcp_latency(const char *host, int port) {
 }
 
 static void run_tui(void) {
-    printf("\033[?25l\033[H\033[J"); // Esconde cursor e limpa tela
+    signal(SIGINT, cleanup_and_exit);
+    signal(SIGTERM, cleanup_and_exit);
+
+    printf("\033[?25l\033[H\033[J");
 
     char public_ip[128] = "Fetching...";
     fetch_public_ip(public_ip, sizeof(public_ip));
@@ -192,7 +204,6 @@ static void run_tui(void) {
             }
             printf("\n  \033[1;36m• TX Upload   : %.2f MB/s\033[0m\033[K\n", tx_mbps);
         } else {
-            // Modo Sem Root: Mede latência RTT em tempo real para 1.1.1.1 (Cloudflare DNS)
             double lat = measure_tcp_latency("1.1.1.1", 53);
             if (lat < 0) lat = measure_tcp_latency("8.8.8.8", 53);
 

@@ -6,23 +6,23 @@ SECTIONS
 
 	.text BLOCK(4K) : ALIGN(4K)
 	{
-		*(.multiboot)
-		*(.text)
+		KEEP(*(.multiboot))
+		*(.text .text.*)
 	}
 
 	.rodata BLOCK(4K) : ALIGN(4K)
 	{
-		*(.rodata)
+		*(.rodata .rodata.*)
 	}
 
 	.data BLOCK(4K) : ALIGN(4K)
 	{
-		*(.data)
+		*(.data .data.*)
 	}
 
 	.bss BLOCK(4K) : ALIGN(4K)
 	{
 		*(COMMON)
-		*(.bss)
+		*(.bss .bss.*)
 	}
 }

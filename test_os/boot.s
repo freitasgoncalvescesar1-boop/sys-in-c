@@ -11,11 +11,10 @@
 .long MAGIC
 .long FLAGS
 .long CHECKSUM
-.long 0, 0, 0, 0, 0
-.long 0                     /* Linear graphics mode */
-.long 800                   /* Width */
-.long 600                   /* Height */
-.long 32                    /* Depth (32 bpp ARGB) */
+.long 0                     /* Linear graphics mode (offset 12) */
+.long 800                   /* Width (offset 16) */
+.long 600                   /* Height (offset 20) */
+.long 32                    /* Depth 32 bpp ARGB (offset 24) */
 
 .section .bss
 .align 16

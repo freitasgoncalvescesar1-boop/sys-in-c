@@ -1,0 +1,76 @@
+
+===============================================================================
+       PYTHONT 1.0-RELEASE - HIGH-PERFORMANCE PYTHON TO NATIVE C JIT ENGINE
+===============================================================================
+
+1. OVERVIEW & PHILOSOPHY
+-------------------------------------------------------------------------------
+PYTHONT 1.0-release is a zero-dependency, standalone source-to-source Python 
+transpiler and Just-In-Time (JIT) native compiler written entirely in pure C.
+
+It transforms standard Python scripts into optimized ANSI C99 code, invoking 
+GCC with -O2 optimization to produce native machine binaries executing at bare-metal 
+speed.
+
+Designed for high portability across Mobile (Android/Termux) and Linux PC.
+
+
+2. ARCHITECTURE & TRANSPILATION PIPELINE
+-------------------------------------------------------------------------------
+A. MULTI-LINE TOKEN ACCUMULATOR
+   - Safely aggregates multi-line expressions, dictionaries { ... }, lists [ ... ], 
+     and block indentations (4 spaces or tabs) mapped to C braces { }.
+
+B. VARIABLE HOISTING & FUNCTION-LEVEL SCOPING
+   - Automatically registers all discovered variables at the top of main() / functions.
+   - Prevents C scope destruction bugs across 'with', 'try', and 'if' blocks.
+
+C. SYMBOL TYPE INFERENCE
+   - VAR_INT   -> int64_t (64-bit signed integers)
+   - VAR_FLOAT -> double (64-bit IEEE-754 floating point)
+   - VAR_STR   -> const char * (ASCII/UTF-8 strings)
+   - VAR_LIST  -> int64_t array[1024] with tracked length
+   - VAR_DICT  -> py_dict_t dynamic string/number key-value store
+   - VAR_OBJ   -> Custom struct mapping with constructor initialization
+   - VAR_FILE  -> py_file_t file descriptor handle
+
+
+3. LANGUAGE SPECIFICATION & FEATURES
+-------------------------------------------------------------------------------
+
+A. LIST COMPREHENSIONS (WITH FILTERS)
+   - nums = [1, 2, 3, 4, 5]
+   - dobros = [x * 2 for x in nums]
+   - pares = [x for x in nums if x % 2 == 0]
+   - quads = [i * i for i in range(1, 6)]
+
+B. CONTEXT MANAGERS (WITH OPEN)
+   - with open("log.txt", "w") as f:
+         f.write("Line 1\n")
+   - with open("log.txt", "r") as f:
+         data = f.read()
+
+C. LAMBDA EXPRESSIONS
+   - quadrado = lambda x: x * x
+   - soma = lambda a, b: a + b
+
+D. EXCEPTION HANDLING (TRY / EXCEPT)
+   - try:
+         x = 100
+     except:
+         print("Error")
+
+E. ADVANCED DICTIONARIES (DICT)
+   - user = {'name': 'Cesar', 'age': 20}
+   - user.get('city', 'Brasilia')
+   - user.keys(), user.values()
+
+F. STRING METHODS & SLICING
+   - s.upper(), s.lower(), s.strip(), s.capitalize(), s.title()
+   - s.startswith("sub"), s.endswith("sub"), s.count("a")
+   - s[0:5], s[::-1] (reversal)
+
+G. BUILT-IN FUNCTIONS
+   - bin(x), hex(x), oct(x), chr(n), ord(c), len(x), sum(x), abs(x), round(x)
+
+===============================================================================

@@ -149,7 +149,6 @@ static void fetch_online_wikipedia(const char *query) {
     close(fd);
     freeaddrinfo(res);
 
-    // Extrai o snippet JSON
     char *snippet_ptr = strstr(response, "\"snippet\":\"");
     if (!snippet_ptr) snippet_ptr = strstr(response, "\"snippet\": \"");
 
@@ -158,7 +157,6 @@ static void fetch_online_wikipedia(const char *query) {
         char *end_snippet = strchr(snippet_ptr, '"');
         if (end_snippet) *end_snippet = '\0';
 
-        // Limpa tags HTML como <span class="searchmatch">
         char clean_snippet[1024];
         size_t c_idx = 0;
         int in_tag = 0;
@@ -187,8 +185,6 @@ static void fetch_online_wikipedia(const char *query) {
 }
 
 static void lookup_phone(const char *model) {
-    /* Output redirection hook - Redirect output here */
-    /* Generic output stream */
     printf("\n%s==========================================%s\n", COLOR_TITLE, COLOR_RESET);
     printf("%s[ get-info - Smartphone Intelligence ]%s\n", COLOR_TITLE, COLOR_RESET);
     printf("%s==========================================%s\n", COLOR_TITLE, COLOR_RESET);
@@ -214,8 +210,6 @@ static void lookup_phone(const char *model) {
 }
 
 static void lookup_pc(const char *part) {
-    /* Output redirection hook - Redirect output here */
-    /* Generic output stream */
     printf("\n%s==========================================%s\n", COLOR_TITLE, COLOR_RESET);
     printf("%s[ get-info - PC Hardware Intelligence ]%s\n", COLOR_TITLE, COLOR_RESET);
     printf("%s==========================================%s\n", COLOR_TITLE, COLOR_RESET);
@@ -225,7 +219,7 @@ static void lookup_pc(const char *part) {
         if (matches_name(pc_db[i].name, part)) {
             printf("  %s• Componente:    %s%s (%s)%s\n", COLOR_LABEL, COLOR_VAL, pc_db[i].name, pc_db[i].type == 0 ? "CPU" : "GPU", COLOR_RESET);
             printf("  %s• Benchmark Score: %s%u pts%s\n", COLOR_LABEL, COLOR_VAL, pc_db[i].score, COLOR_RESET);
-            printf("  %s• Consumo (TDP): %s%u Watts%s\n", COLOR_LABEL, COLOR_RESET, pc_db[i].tdp_w);
+            printf("  %s• Consumo (TDP): %s%u Watts%s\n", COLOR_LABEL, COLOR_VAL, pc_db[i].tdp_w, COLOR_RESET);
             printf("  %s• Veredito:      %s%s%s\n", COLOR_LABEL, COLOR_WARN, pc_db[i].verdict, COLOR_RESET);
             printf("------------------------------------------\n");
             found = 1;
