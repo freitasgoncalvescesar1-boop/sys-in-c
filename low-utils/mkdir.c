@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <ctype.h>
 #include <errno.h>
 #include "low.h"
 
@@ -24,17 +25,15 @@ static void print_help(void) {
     printf("%sUSAGE:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  ./mkdir [OPTIONS] <DIRECTORY...>\n\n");
     printf("%sDESCRIPTION:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  Create directories with parent hierarchy creation (-p), mode setting (-m), and verbose logs.\n\n");
+    printf("  Create directories with parent creation (-p), mode (-m), and combined flags.\n\n");
     printf("%sOPTIONS:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  %s-p, --parents%s        Make parent directories as needed, no error if existing\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-m, --mode <MODE>%s    Set file mode (permissions octal like 755 or 700)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-m, --mode <MODE>%s    Set permissions (octal: 755 or 700)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-v, --verbose%s        Print a message for each created directory\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-h, --help%s           Display this formatted help guide and exit\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-v, --version%s        Display version and repository information\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sEXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %s./mkdir -p projeto/src/modulos%s          (Cria toda a arvore de pastas)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./mkdir -m 700 pasta_privada%s            (Cria com permissao restrita rwx------)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./mkdir -pv ~/backups/2026/08%s           (Cria com verbose e expansao de ~)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  %s-h, --help%s           Display this help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("%sCOMBINED SHORT FLAGS EXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  • %s./mkdir -pv ./projeto/src/modulos/%s     (Parents + Verbose)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./mkdir -pm 700 ./privado/sub/%s         (Parents + Mode 700)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
 static void expand_tilde(const char *in, char *out, size_t out_len) {
@@ -86,29 +85,11 @@ static int make_parents(const char *path, mode_t mode, int verbose) {
             fprintf(stderr, "  %s[ERRO]%s falha ao criar '%s': %s\n", COLOR_ERR, COLOR_RESET, temp, strerror(errno));
             return -1;
         }
-        if (has_custom_mode) {
-            chmod(temp, mode);
-        }
-        if (verbose) {
-            printf("  %s[OK]%s   Diretorio criado:     %s%s/%s\n", COLOR_OK, COLOR_RESET, COLOR_DIR, temp, COLOR_RESET);
-        }
+        if (has_custom_mode) chmod(temp, mode);
+        if (verbose) printf("  %s[OK]%s   Diretorio criado:     %s%s/%s\n", COLOR_OK, COLOR_RESET, COLOR_DIR, temp, COLOR_RESET);
     } else if (!S_ISDIR(st.st_mode)) {
         fprintf(stderr, "  %s[ERRO]%s '%s' existe e nao e um diretorio\n", COLOR_ERR, COLOR_RESET, temp);
         return -1;
-    }
-    return 0;
-}
-
-static int make_single_dir(const char *path, mode_t mode, int verbose) {
-    if (mkdir(path, mode) != 0) {
-        fprintf(stderr, "  %s[ERRO]%s falha ao criar '%s': %s\n", COLOR_ERR, COLOR_RESET, path, strerror(errno));
-        return -1;
-    }
-    if (has_custom_mode) {
-        chmod(path, mode);
-    }
-    if (verbose) {
-        printf("  %s[OK]%s   Diretorio criado: %s%s/%s\n", COLOR_OK, COLOR_RESET, COLOR_DIR, path, COLOR_RESET);
     }
     return 0;
 }
@@ -118,33 +99,40 @@ int main(int argc, char *argv[]) {
     int dir_count = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
-            strcmp(argv[i], "--version") == 0) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_help();
             return 0;
         }
 
-        if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--parents") == 0) {
-            opt_parents = 1;
-        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
-            opt_verbose = 1;
-        } else if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--mode") == 0) {
-            if (i + 1 < argc) {
-                const char *m_str = argv[++i];
-                custom_mode = (mode_t)strtol(m_str, NULL, 8);
-                has_custom_mode = 1;
-            }
-        } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
-            for (size_t j = 1; j < strlen(argv[i]); j++) {
-                if (argv[i][j] == 'p') opt_parents = 1;
-                else if (argv[i][j] == 'v') opt_verbose = 1;
-                else if (argv[i][j] == 'm' && i + 1 < argc) {
-                    custom_mode = (mode_t)strtol(argv[++i], NULL, 8);
-                    has_custom_mode = 1;
-                    break;
+        if (strcmp(argv[i], "--parents") == 0) { opt_parents = 1; continue; }
+        if (strcmp(argv[i], "--verbose") == 0) { opt_verbose = 1; continue; }
+        if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            custom_mode = (mode_t)strtol(argv[++i], NULL, 8);
+            has_custom_mode = 1;
+            continue;
+        }
+
+        if (argv[i][0] == '-' && argv[i][1] != '\0') {
+            size_t flen = strlen(argv[i]);
+            for (size_t j = 1; j < flen; j++) {
+                char opt = argv[i][j];
+                if (opt == 'p') opt_parents = 1;
+                else if (opt == 'v') opt_verbose = 1;
+                else if (opt == 'm') {
+                    if (j + 1 < flen && isdigit((unsigned char)argv[i][j + 1])) {
+                        custom_mode = (mode_t)strtol(&argv[i][j + 1], NULL, 8);
+                        has_custom_mode = 1;
+                        break;
+                    } else if (i + 1 < argc) {
+                        custom_mode = (mode_t)strtol(argv[++i], NULL, 8);
+                        has_custom_mode = 1;
+                        break;
+                    }
+                } else if (opt == 'h') {
+                    print_help();
+                    return 0;
                 } else {
-                    fprintf(stderr, "mkdir: opcao desconhecida '-%c'\n", argv[i][j]);
-                    return 1;
+                    fprintf(stderr, "mkdir: opcao desconhecida '-%c'\n", opt);
                 }
             }
         } else {
@@ -161,12 +149,7 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < dir_count; i++) {
         char exp_path[2048];
         expand_tilde(dirs[i], exp_path, sizeof(exp_path));
-
-        if (opt_parents) {
-            if (make_parents(exp_path, custom_mode, opt_verbose) < 0) has_errors = 1;
-        } else {
-            if (make_single_dir(exp_path, custom_mode, opt_verbose) < 0) has_errors = 1;
-        }
+        if (make_parents(exp_path, custom_mode, opt_verbose) < 0) has_errors = 1;
     }
 
     return has_errors ? 1 : 0;

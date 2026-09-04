@@ -1,0 +1,50 @@
+
+===============================================================================
+       JAIL 2.6 - HERMETIC SECCOMP-BPF SANDBOX, MONITOR DUMP & NERD MODE
+===============================================================================
+
+1. OVERVIEW & PHILOSOPHY
+-------------------------------------------------------------------------------
+JAIL 2.6 is an enterprise-grade Linux Seccomp-BPF process sandbox and security 
+auditor written in pure C.
+
+It traps unauthorized syscalls, prevents in-memory fileless execution (W^X), 
+locks down IPC, drops process privileges, and dumps execution forensics.
+
+
+2. ADVANCED MONITORING & AUDITING (-om & -nd)
+-------------------------------------------------------------------------------
+A. ONLY-MONITOR LOG DUMP (-om [FILE])
+   - Records execution metrics, blocked permissions, CPU time, and exit diagnosis 
+     into 'jail_audit.log' (or custom file).
+
+B. NERD MODE (-nd / --nerd)
+   - Displays real-time hardware telemetry:
+     * CPU Architecture & register state context.
+     * User vs System CPU execution ticks.
+     * Voluntary / Involuntary context switches.
+     * Peak Resident Set Size (RSS) memory consumption and page fault counts.
+
+
+3. DEFENSE TIERS
+-------------------------------------------------------------------------------
+- -n, --no-net    : Block all network communication
+- -w, --no-write  : Block file modification and deletion
+- -e, --no-exec   : Block subprocess spawning (clone, fork, execve)
+- -x, --no-wx     : Block memory execution (memfd_create, userfaultfd)
+- -i, --no-ipc    : Block SysV IPC & shared memory
+- -k, --no-signal : Block kill and signal tampering
+- -s, --strict    : Complete lockdown (All blocks active)
+- -t <SECS>       : Execution timeout watchdog
+- -m <MB>         : Virtual memory ceiling (RLIMIT_AS)
+
+
+4. EXAMPLES
+-------------------------------------------------------------------------------
+- Audit Process Execution into Log File:
+  $ jail -om -- ./httpget http://google.com
+
+- Inspect Process Registers & Telemetry (Nerd Mode):
+  $ jail -nd -s -- /bin/sh -c "echo 'Nerd Mode Test'"
+
+===============================================================================

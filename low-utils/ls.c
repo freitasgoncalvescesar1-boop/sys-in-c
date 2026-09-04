@@ -12,12 +12,12 @@
 #include "low.h"
 
 #define COLOR_RESET   "\033[0m"
-#define COLOR_DIR     "\033[1;34m" // Azul
-#define COLOR_EXEC    "\033[1;32m" // Verde
-#define COLOR_LINK    "\033[1;36m" // Ciano
-#define COLOR_ARCHIVE "\033[1;31m" // Vermelho
-#define COLOR_SOCK    "\033[1;35m" // Magenta
-#define COLOR_INODE   "\033[1;33m" // Amarelo
+#define COLOR_DIR     "\033[1;34m"
+#define COLOR_EXEC    "\033[1;32m"
+#define COLOR_LINK    "\033[1;36m"
+#define COLOR_ARCHIVE "\033[1;31m"
+#define COLOR_SOCK    "\033[1;35m"
+#define COLOR_INODE   "\033[1;33m"
 
 typedef struct {
     char name[256];
@@ -33,7 +33,7 @@ static void print_help(void) {
     printf("%sUSAGE:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  ./ls [OPTIONS] [FILE/DIR...]\n\n");
     printf("%sDESCRIPTION:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  Colorized directory content lister with Inode discovery and smart sorting.\n\n");
+    printf("  Colorized directory lister with combined flags, Inode tracking, and smart sorting.\n\n");
     printf("%sOPTIONS:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  %s-l%s                  Use long listing format\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-a, --all%s           Do not ignore entries starting with .\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
@@ -44,13 +44,10 @@ static void print_help(void) {
     printf("  %s-t%s                  Sort by modification time, newest first\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-r, --reverse%s       Reverse order while sorting\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-1%s                  List one file per line\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-h, --help%s          Display this formatted help guide and exit\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-v, --version%s       Display version and repository information\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sCOLOR SCHEME:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %sBlue%s      -> Directories\n", COLOR_DIR, COLOR_RESET);
-    printf("  • %sGreen%s     -> Executable binaries and scripts\n", COLOR_EXEC, COLOR_RESET);
-    printf("  • %sCyan%s      -> Symbolic links (atalho -> alvo)\n", COLOR_LINK, COLOR_RESET);
-    printf("  • %sRed%s       -> Archive and compressed packages (.zip, .tar, .gz)\n\n", COLOR_ARCHIVE, COLOR_RESET);
+    printf("  %s-h, --help%s          Display this help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("%sCOMBINED SHORT FLAGS EXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  • %s./ls -lah%s                           (Long + All + Human-readable)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./ls -ltr%s                           (Long + Time + Reverse)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
 static void format_size(off_t size, char *buf, size_t sz) {
@@ -87,10 +84,6 @@ static void mode_to_str(mode_t mode, char *str) {
     if (mode & S_IROTH) str[7] = 'r';
     if (mode & S_IWOTH) str[8] = 'w';
     if (mode & S_IXOTH) str[9] = 'x';
-
-    if (mode & S_ISUID) str[3] = (mode & S_IXUSR) ? 's' : 'S';
-    if (mode & S_ISGID) str[6] = (mode & S_IXGRP) ? 's' : 'S';
-    if (mode & S_ISVTX) str[9] = (mode & S_IXOTH) ? 't' : 'T';
 }
 
 static const char *get_color(mode_t mode, const char *name) {
@@ -121,10 +114,7 @@ static int compare_entries(const void *a, const void *b) {
         else if (fb->st.st_mtim.tv_sec < fa->st.st_mtim.tv_sec) res = -1;
     }
 
-    if (res == 0) {
-        res = strcasecmp(fa->name, fb->name);
-    }
-
+    if (res == 0) res = strcasecmp(fa->name, fb->name);
     return opt_r ? -res : res;
 }
 
@@ -144,9 +134,7 @@ static void print_entry_long(const FileEntry *e) {
     struct tm *tm_info = localtime(&e->st.st_mtim.tv_sec);
     strftime(time_str, sizeof(time_str), "%b %d %H:%M", tm_info);
 
-    if (opt_i) {
-        printf("%s%9lu%s ", COLOR_INODE, (unsigned long)e->st.st_ino, COLOR_RESET);
-    }
+    if (opt_i) printf("%s%9lu%s ", COLOR_INODE, (unsigned long)e->st.st_ino, COLOR_RESET);
 
     printf("%s %2u %-8s %-8s %6s %s %s%s%s",
            mode_str, (unsigned int)e->st.st_nlink,
@@ -166,7 +154,6 @@ static int list_directory(const char *dir_path) {
         return -1;
     }
 
-    // Se for um arquivo regular, apenas lista ele
     if (!S_ISDIR(st.st_mode)) {
         FileEntry single;
         strncpy(single.name, dir_path, sizeof(single.name) - 1);
@@ -192,10 +179,7 @@ static int list_directory(const char *dir_path) {
     }
 
     FileEntry *entries = malloc(4096 * sizeof(FileEntry));
-    if (!entries) {
-        closedir(dir);
-        return -1;
-    }
+    if (!entries) { closedir(dir); return -1; }
 
     size_t count = 0;
     struct dirent *de;
@@ -242,33 +226,31 @@ int main(int argc, char *argv[]) {
     int target_count = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
-            strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_help();
             return 0;
         }
+        if (strcmp(argv[i], "--all") == 0) { opt_a = 1; continue; }
+        if (strcmp(argv[i], "--almost-all") == 0) { opt_A = 1; continue; }
+        if (strcmp(argv[i], "--inode") == 0) { opt_i = 1; continue; }
+        if (strcmp(argv[i], "--human-readable") == 0) { opt_h = 1; continue; }
+        if (strcmp(argv[i], "--reverse") == 0) { opt_r = 1; continue; }
 
         if (argv[i][0] == '-' && argv[i][1] != '\0') {
-            if (strcmp(argv[i], "--all") == 0) opt_a = 1;
-            else if (strcmp(argv[i], "--almost-all") == 0) opt_A = 1;
-            else if (strcmp(argv[i], "--inode") == 0) opt_i = 1;
-            else if (strcmp(argv[i], "--human-readable") == 0) opt_h = 1;
-            else if (strcmp(argv[i], "--reverse") == 0) opt_r = 1;
-            else {
-                for (size_t j = 1; j < strlen(argv[i]); j++) {
-                    if (argv[i][j] == 'l') opt_l = 1;
-                    else if (argv[i][j] == 'a') opt_a = 1;
-                    else if (argv[i][j] == 'A') opt_A = 1;
-                    else if (argv[i][j] == 'i') opt_i = 1;
-                    else if (argv[i][j] == 'h') opt_h = 1;
-                    else if (argv[i][j] == 'S') opt_S = 1;
-                    else if (argv[i][j] == 't') opt_t = 1;
-                    else if (argv[i][j] == 'r') opt_r = 1;
-                    else if (argv[i][j] == '1') opt_1 = 1;
-                    else {
-                        fprintf(stderr, "ls: opcao desconhecida '-%c'\n", argv[i][j]);
-                        return 1;
-                    }
+            size_t flen = strlen(argv[i]);
+            for (size_t j = 1; j < flen; j++) {
+                char opt = argv[i][j];
+                if (opt == 'l') opt_l = 1;
+                else if (opt == 'a') opt_a = 1;
+                else if (opt == 'A') opt_A = 1;
+                else if (opt == 'i') opt_i = 1;
+                else if (opt == 'h') opt_h = 1;
+                else if (opt == 'S') opt_S = 1;
+                else if (opt == 't') opt_t = 1;
+                else if (opt == 'r') opt_r = 1;
+                else if (opt == '1') opt_1 = 1;
+                else {
+                    fprintf(stderr, "ls: opcao desconhecida '-%c'\n", opt);
                 }
             }
         } else {
@@ -283,12 +265,8 @@ int main(int argc, char *argv[]) {
 
     int has_errors = 0;
     for (int i = 0; i < target_count; i++) {
-        if (target_count > 1) {
-            printf("\n%s%s:%s\n", LOW_COLOR_LABEL, targets[i], LOW_COLOR_RESET);
-        }
-        if (list_directory(targets[i]) < 0) {
-            has_errors = 1;
-        }
+        if (target_count > 1) printf("\n%s%s:%s\n", LOW_COLOR_LABEL, targets[i], LOW_COLOR_RESET);
+        if (list_directory(targets[i]) < 0) has_errors = 1;
     }
 
     return has_errors ? 1 : 0;

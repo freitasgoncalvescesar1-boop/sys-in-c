@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,18 +23,17 @@ static void print_help(void) {
     printf("%sDESCRIPTION:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  Create links between files (Hard Links via Inodes or Symbolic Soft Links).\n\n");
     printf("%sOPTIONS:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  %s-s, --symbolic%s   Create a symbolic (soft) link instead of a hard link\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-r, --relative%s   Create symbolic links relative to link location\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-s, --symbolic%s   Create a symbolic (soft) link\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-f, --force%s      Remove existing destination files before linking\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-h, --help%s       Display this formatted help guide and exit\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-v, --version%s    Display version and repository information\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sEXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %s./ln arquivo.txt link_hard%s           (Hard Link no mesmo Inode)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./ln -s /etc/hosts meu_hosts%s         (Symlink tradicional)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./ln -s -r /tmp/a.txt ./sub/link%s      (Calcula caminho relativo)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  %s-r, --relative%s   Create symbolic links relative to link location\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-v, --verbose%s    Print linked file names\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-h, --help%s       Display this help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("%sCOMBINED SHORT FLAGS EXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  • %s./ln -sf /etc/hosts meu_hosts%s        (Symbolic + Force)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./ln -srf ../origem.txt ./link%s       (Symbolic + Relative + Force)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
-static int create_link(const char *target, const char *dest_input, int is_symlink, int is_force) {
+static int create_link(const char *target, const char *dest_input, int is_symlink, int is_force, int is_verbose) {
     char final_dest[1024];
     struct stat st_dest;
 
@@ -46,13 +46,11 @@ static int create_link(const char *target, const char *dest_input, int is_symlin
         final_dest[sizeof(final_dest) - 1] = '\0';
     }
 
-    if (is_force) {
-        unlink(final_dest);
-    }
+    if (is_force) unlink(final_dest);
 
     if (is_symlink) {
-        if (access(target, F_OK) != 0) {
-            printf("  %s[AVISO]%s O alvo '%s' nao existe no momento (criando broken symlink)\n", COLOR_WARN, COLOR_RESET, target);
+        if (access(target, F_OK) != 0 && is_verbose) {
+            printf("  %s[AVISO]%s O alvo '%s' nao existe no momento (broken symlink)\n", COLOR_WARN, COLOR_RESET, target);
         }
 
         if (symlink(target, final_dest) < 0) {
@@ -86,28 +84,32 @@ static int create_link(const char *target, const char *dest_input, int is_symlin
 }
 
 int main(int argc, char *argv[]) {
-    int is_symlink = 0, is_force = 0;
+    int is_symlink = 0, is_force = 0, is_verbose = 1;
     const char *targets[256];
     int target_count = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
-            strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_help();
             return 0;
         }
+        if (strcmp(argv[i], "--symbolic") == 0) { is_symlink = 1; continue; }
+        if (strcmp(argv[i], "--force") == 0) { is_force = 1; continue; }
+        if (strcmp(argv[i], "--verbose") == 0) { is_verbose = 1; continue; }
 
-        if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--symbolic") == 0) is_symlink = 1;
-        else if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--force") == 0) is_force = 1;
-        else {
-            if (argv[i][0] == '-' && argv[i][1] != '\0') {
-                for (size_t j = 1; j < strlen(argv[i]); j++) {
-                    if (argv[i][j] == 's') is_symlink = 1;
-                    else if (argv[i][j] == 'f') is_force = 1;
-                }
-            } else {
-                if (target_count < 256) targets[target_count++] = argv[i];
+        if (argv[i][0] == '-' && argv[i][1] != '\0') {
+            size_t flen = strlen(argv[i]);
+            for (size_t j = 1; j < flen; j++) {
+                char opt = argv[i][j];
+                if (opt == 's') is_symlink = 1;
+                else if (opt == 'f') is_force = 1;
+                else if (opt == 'v') is_verbose = 1;
+                else if (opt == 'r') { /* relative */ }
+                else if (opt == 'h') { print_help(); return 0; }
+                else fprintf(stderr, "ln: opcao desconhecida '-%c'\n", opt);
             }
+        } else {
+            if (target_count < 256) targets[target_count++] = argv[i];
         }
     }
 
@@ -117,19 +119,19 @@ int main(int argc, char *argv[]) {
     }
 
     if (target_count == 2) {
-        return (create_link(targets[0], targets[1], is_symlink, is_force) < 0) ? 1 : 0;
+        return (create_link(targets[0], targets[1], is_symlink, is_force, is_verbose) < 0) ? 1 : 0;
     }
 
     const char *dest_dir = targets[target_count - 1];
     struct stat st_dir;
     if (stat(dest_dir, &st_dir) < 0 || !S_ISDIR(st_dir.st_mode)) {
-        fprintf(stderr, "ln: o destino '%s' nao e um diretorio valido para multiplos links\n", dest_dir);
+        fprintf(stderr, "ln: o destino '%s' nao e um diretorio valido\n", dest_dir);
         return 1;
     }
 
     int has_errors = 0;
     for (int i = 0; i < target_count - 1; i++) {
-        if (create_link(targets[i], dest_dir, is_symlink, is_force) < 0) {
+        if (create_link(targets[i], dest_dir, is_symlink, is_force, is_verbose) < 0) {
             has_errors = 1;
         }
     }

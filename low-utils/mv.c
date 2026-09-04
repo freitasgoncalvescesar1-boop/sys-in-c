@@ -9,6 +9,7 @@
 #include <sys/syscall.h>
 #include <dirent.h>
 #include <utime.h>
+#include <ctype.h>
 #include <errno.h>
 #include "low.h"
 
@@ -42,21 +43,19 @@ static void print_help(void) {
     printf("  ./mv [OPTIONS] <SOURCE> <DESTINATION>\n");
     printf("  ./mv [OPTIONS] <SOURCE...> <DIRECTORY>\n\n");
     printf("%sDESCRIPTION:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  Move (rename) files with cross-filesystem fallback, backup, and update modes.\n\n");
+    printf("  Move (rename) files with cross-device fallback, combined flags, and update mode.\n\n");
     printf("%sOPTIONS:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  %s-f, --force%s               Do not prompt before overwriting\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-i, --interactive%s         Prompt before overwrite\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-n, --no-clobber%s          Do not overwrite an existing file\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-n, --no-clobber%s          Do not overwrite existing files\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-u, --update%s              Move only when SOURCE is newer than DEST or missing\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-b, --backup%s              Make a backup of each existing destination file (~)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-v, --verbose%s             Explain what is being done\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-T, --no-target-directory%s Treat DEST as a normal file\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-h, --help%s                Display this formatted help guide and exit\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-v, --version%s             Display version and repository information\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sEXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %s./mv antigo.txt novo.txt%s            (Renomeacao atomica instantanea)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./mv arquivo.txt ~/Downloads/%s       (Move com expansao de ~)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./mv -b config.json ./destino/%s      (Cria backup config.json~ se existir)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./mv -u app.c ./build/%s               (Move apenas se a versao for mais recente)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  %s-h, --help%s                Display this formatted help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("%sCOMBINED SHORT FLAGS EXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  • %s./mv -uv antigo.txt ./build/%s          (Update + Verbose)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./mv -fv arq1.txt ~/Downloads/%s        (Force + Verbose)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
 static void expand_tilde(const char *in, char *out, size_t out_len) {
@@ -79,14 +78,13 @@ static inline ssize_t k_copy_file_range(int fd_in, off_t *off_in, int fd_out, of
 #elif defined(__NR_copy_file_range)
     return syscall(__NR_copy_file_range, fd_in, off_in, fd_out, off_out, len, flags);
 #else
+    (void)fd_in; (void)off_in; (void)fd_out; (void)off_out; (void)len; (void)flags;
     errno = ENOSYS;
     return -1;
 #endif
 }
 
-// Cópia Zero-Copy para movimentação entre partições/discos diferentes (EXDEV)
 static int cross_device_move(const char *src, const char *dest, struct stat *st_src) {
-    // Se for link simbólico
     if (S_ISLNK(st_src->st_mode)) {
         char link_target[1024];
         ssize_t len = readlink(src, link_target, sizeof(link_target) - 1);
@@ -127,7 +125,7 @@ static int cross_device_move(const char *src, const char *dest, struct stat *st_
     close(fd_in);
     close(fd_out);
 
-    unlink(src); // Remove origem com sucesso
+    unlink(src);
     return 0;
 }
 
@@ -142,7 +140,6 @@ static int move_single_file(const char *src_raw, const char *dest_input) {
         return -1;
     }
 
-    // Trata se o destino for um diretório
     struct stat st_dest;
     int dest_exists = (lstat(dest_base, &st_dest) == 0);
 
@@ -155,41 +152,34 @@ static int move_single_file(const char *src_raw, const char *dest_input) {
         final_dest[sizeof(final_dest) - 1] = '\0';
     }
 
-    // Checagem de existência no destino final
     struct stat st_final;
     int final_exists = (lstat(final_dest, &st_final) == 0);
 
     if (final_exists) {
-        // Previne mover sobre o mesmo arquivo
         if (st_src.st_ino == st_final.st_ino && st_src.st_dev == st_final.st_dev) {
             fprintf(stderr, "  %s[ERRO]%s '%s' e '%s' sao o mesmo arquivo!\n", COLOR_ERR, COLOR_RESET, src, final_dest);
             return -1;
         }
 
-        // Flag -n (--no-clobber): Não sobrescreve
         if (opt_no_clobber) {
             if (opt_verbose) printf("  [Ignorado: %s ja existe]\n", final_dest);
             return 0;
         }
 
-        // Flag -u (--update): Apenas se a origem for mais recente
-        if (opt_update) {
-            if (st_src.st_mtim.tv_sec < st_final.st_mtim.tv_sec) {
-                if (opt_verbose) printf("  [Ignorado: %s e mais recente que origem]\n", final_dest);
-                return 0;
-            }
+        if (opt_update && (st_src.st_mtim.tv_sec <= st_final.st_mtim.tv_sec)) {
+            if (opt_verbose) printf("  [Ignorado: %s e mais recente]\n", final_dest);
+            return 0;
         }
 
-        // Flag -b (--backup): Cria cópia final_dest~
         if (opt_backup) {
             char backup_path[1050];
             snprintf(backup_path, sizeof(backup_path), "%s~", final_dest);
             rename(final_dest, backup_path);
         }
 
-        // Flag -i (--interactive)
         if (opt_interactive && !opt_force) {
             printf("mv: sobrescrever '%s'? (s/n): ", final_dest);
+            fflush(stdout);
             char ans = getchar();
             while (getchar() != '\n');
             if (ans != 's' && ans != 'S' && ans != 'y' && ans != 'Y') {
@@ -198,7 +188,6 @@ static int move_single_file(const char *src_raw, const char *dest_input) {
         }
     }
 
-    // 1. Tenta a Syscall rename() atômica instantânea
     if (rename(src, final_dest) == 0) {
         if (opt_verbose) {
             printf("  %s[OK]%s   %s%s%s -> %s%s%s (Renomeado)\n",
@@ -207,7 +196,6 @@ static int move_single_file(const char *src_raw, const char *dest_input) {
         return 0;
     }
 
-    // 2. Se falhar com EXDEV (Cross-device / discos diferentes), executa Zero-Copy + Unlink
     if (errno == EXDEV) {
         if (cross_device_move(src, final_dest, &st_src) == 0) {
             if (opt_verbose) {
@@ -223,23 +211,50 @@ static int move_single_file(const char *src_raw, const char *dest_input) {
 }
 
 int main(int argc, char *argv[]) {
+    int stop_flags = 0;
     const char *sources[256];
     int source_count = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
-            strcmp(argv[i], "--version") == 0) {
-            print_help();
-            return 0;
+        if (!stop_flags && strcmp(argv[i], "--") == 0) {
+            stop_flags = 1;
+            continue;
         }
 
-        if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--force") == 0) opt_force = 1;
-        else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) opt_interactive = 1;
-        else if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--no-clobber") == 0) opt_no_clobber = 1;
-        else if (strcmp(argv[i], "-u") == 0 || strcmp(argv[i], "--update") == 0) opt_update = 1;
-        else if (strcmp(argv[i], "-b") == 0 || strcmp(argv[i], "--backup") == 0) opt_backup = 1;
-        else if (strcmp(argv[i], "-T") == 0 || strcmp(argv[i], "--no-target-directory") == 0) opt_no_target_dir = 1;
-        else {
+        if (!stop_flags && argv[i][0] == '-' && argv[i][1] != '\0') {
+            if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+                print_help();
+                return 0;
+            }
+            if (strcmp(argv[i], "--version") == 0) {
+                print_help();
+                return 0;
+            }
+            if (strcmp(argv[i], "--force") == 0) { opt_force = 1; continue; }
+            if (strcmp(argv[i], "--interactive") == 0) { opt_interactive = 1; continue; }
+            if (strcmp(argv[i], "--no-clobber") == 0) { opt_no_clobber = 1; continue; }
+            if (strcmp(argv[i], "--update") == 0) { opt_update = 1; continue; }
+            if (strcmp(argv[i], "--backup") == 0) { opt_backup = 1; continue; }
+            if (strcmp(argv[i], "--verbose") == 0) { opt_verbose = 1; continue; }
+            if (strcmp(argv[i], "--no-target-directory") == 0) { opt_no_target_dir = 1; continue; }
+
+            // Flags combinadas (ex: -uv, -fv, -bv, -nv)
+            size_t flen = strlen(argv[i]);
+            for (size_t j = 1; j < flen; j++) {
+                char opt = argv[i][j];
+                if (opt == 'f') opt_force = 1;
+                else if (opt == 'i') opt_interactive = 1;
+                else if (opt == 'n') opt_no_clobber = 1;
+                else if (opt == 'u') opt_update = 1;
+                else if (opt == 'b') opt_backup = 1;
+                else if (opt == 'v') opt_verbose = 1;
+                else if (opt == 'T') opt_no_target_dir = 1;
+                else if (opt == 'h') { print_help(); return 0; }
+                else {
+                    if (!opt_force) fprintf(stderr, "mv: opcao desconhecida '-%c'\n", opt);
+                }
+            }
+        } else {
             if (source_count < 256) sources[source_count++] = argv[i];
         }
     }
@@ -255,10 +270,9 @@ int main(int argc, char *argv[]) {
     if (source_count > 1 && !opt_no_target_dir) {
         char exp_dest[1024];
         expand_tilde(dest, exp_dest, sizeof(exp_dest));
-
         struct stat st_dir;
         if (stat(exp_dest, &st_dir) < 0 || !S_ISDIR(st_dir.st_mode)) {
-            fprintf(stderr, "mv: o destino '%s' nao e um diretorio valido para multiplos arquivos\n", dest);
+            fprintf(stderr, "mv: o destino '%s' nao e um diretorio valido\n", dest);
             return 1;
         }
     }

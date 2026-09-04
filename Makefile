@@ -6,8 +6,8 @@ LDFLAGS_IPC = -L. -lutilipc -Wl,-rpath,. -lpthread
 LIB_IPC = libutilipc.so
 SRC_TOOLS = sysbox calc passgen bigfiles portcheck hashcalc b64 sysinfo org netinfo ffind ipcmon simplehost watchcmd strutils fdup deview cpuplot qrcli bench get-info utils-help netclip snc jsonview speedtest httpget tedit netscan dnsquery diskbench krypt rawcat hwcaps matrix pwr sntp tree pythont chip8 bytebeat disasm asciiray
 HEAVY_TOOLS = raycast3d
-LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which
-INSTALL_LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which
+LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace
+INSTALL_LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace
 ALL_TOOLS = $(SRC_TOOLS) $(HEAVY_TOOLS) $(LOW_TOOLS)
 
 all: $(LIB_IPC) $(ALL_TOOLS)
@@ -153,6 +153,8 @@ jail: low-utils/jail.c low-utils/low.h
 	$(CC) $(CFLAGS) low-utils/jail.c -o jail
 which: low-utils/which.c low-utils/low.h
 	$(CC) $(CFLAGS) low-utils/which.c -o which
+ptrace: low-utils/ptrace.c low-utils/low.h
+	$(CC) $(CFLAGS) low-utils/ptrace.c -o ptrace
 
 # --- FREESTANDING / OS ---
 free: freestanding/kmem.c freestanding/kfixed.c freestanding/kprintf.c freestanding/kgfx.c freestanding/kringbuf.c freestanding/kstring.c freestanding/klist.c freestanding/kspinlock.c freestanding/kvfs.c freestanding/kata.c freestanding/kdiskfs.c freestanding/ksound.c freestanding/kbmp.c freestanding/main_test.c freestanding/kcalc.c

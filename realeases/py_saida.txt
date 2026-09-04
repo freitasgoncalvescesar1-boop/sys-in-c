@@ -1,2 +1,0 @@
-Gravado nativamente pelo pythont 5.0!
-Segunda linha gravada no arquivo pelo runtime C.

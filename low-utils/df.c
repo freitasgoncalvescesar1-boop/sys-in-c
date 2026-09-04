@@ -20,20 +20,19 @@ static int opt_h = 1, opt_T = 0, opt_i = 0, opt_a = 0;
 static void print_help(void) {
     low_print_banner("df");
     printf("%sUSAGE:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  ./df [OPTIONS] [FILE/MOUNT...]\n\n");
+    printf("  ./df [OPTIONS] [MOUNT/FILE...]\n\n");
     printf("%sDESCRIPTION:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  Report file system disk space usage and Inode statistics with visual meters.\n\n");
+    printf("  Report file system disk space usage with visual meters and combined flags.\n\n");
     printf("%sOPTIONS:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  %s-h, --human-readable%s Print sizes in human readable format (e.g., 1K 234M 2G) [Default]\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-h, --human-readable%s Print sizes in human readable format (1K 234M 2G) [Default]\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-T, --print-type%s     Print file system type (ext4, f2fs, vfat, etc.)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-i, --inodes%s         List inode information instead of block usage\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-a, --all%s            Include pseudo and duplicate file systems\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-h, --help%s           Display this formatted help guide and exit\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-v, --version%s        Display version and repository information\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sEXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %s./df%s                           (Exibe particoes principais com barra de uso)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./df -T%s                        (Exibe com os tipos de filesystem)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./df -i%s                        (Exibe uso de Inodes)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  %s-k%s                   Print sizes in 1K blocks\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-h, --help%s           Display this help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("%sCOMBINED SHORT FLAGS EXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  • %s./df -Th%s                            (Print Type + Human-readable)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./df -iah%s                           (Inodes + All + Human-readable)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
 static void format_size(unsigned long long bytes, char *buf, size_t sz) {
@@ -84,7 +83,6 @@ static void print_meter_bar(int pct) {
 static void display_mount(const char *fsname, const char *dir, const char *type) {
     struct statvfs vfs;
     if (statvfs(dir, &vfs) < 0) return;
-
     if (vfs.f_blocks == 0 && !opt_a) return;
 
     if (opt_i) {
@@ -130,16 +128,27 @@ static void display_mount(const char *fsname, const char *dir, const char *type)
 
 int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
-            strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "--help") == 0) {
             print_help();
             return 0;
         }
+        if (strcmp(argv[i], "--print-type") == 0) { opt_T = 1; continue; }
+        if (strcmp(argv[i], "--inodes") == 0) { opt_i = 1; continue; }
+        if (strcmp(argv[i], "--all") == 0) { opt_a = 1; continue; }
+        if (strcmp(argv[i], "--human-readable") == 0) { opt_h = 1; continue; }
 
-        if (strcmp(argv[i], "-T") == 0 || strcmp(argv[i], "--print-type") == 0) opt_T = 1;
-        else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--inodes") == 0) opt_i = 1;
-        else if (strcmp(argv[i], "-a") == 0 || strcmp(argv[i], "--all") == 0) opt_a = 1;
-        else if (strcmp(argv[i], "-k") == 0) opt_h = 0;
+        if (argv[i][0] == '-' && argv[i][1] != '\0') {
+            size_t flen = strlen(argv[i]);
+            for (size_t j = 1; j < flen; j++) {
+                char opt = argv[i][j];
+                if (opt == 'T') opt_T = 1;
+                else if (opt == 'i') opt_i = 1;
+                else if (opt == 'a') opt_a = 1;
+                else if (opt == 'h') opt_h = 1;
+                else if (opt == 'k') opt_h = 0;
+                else if (opt == 'H') { print_help(); return 0; }
+            }
+        }
     }
 
     FILE *fp = setmntent("/proc/mounts", "r");

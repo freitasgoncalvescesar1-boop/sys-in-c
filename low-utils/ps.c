@@ -12,10 +12,10 @@
 
 #define COLOR_RESET   "\033[0m"
 #define COLOR_PID     "\033[1;33m"
-#define COLOR_RUN     "\033[1;32m" // Verde (R)
-#define COLOR_SLEEP   "\033[0;34m" // Azul (S)
-#define COLOR_ZOMBIE  "\033[1;31m" // Vermelho (Z)
-#define COLOR_DISK    "\033[1;35m" // Magenta (D)
+#define COLOR_RUN     "\033[1;32m"
+#define COLOR_SLEEP   "\033[0;34m"
+#define COLOR_ZOMBIE  "\033[1;31m"
+#define COLOR_DISK    "\033[1;35m"
 #define COLOR_USER    "\033[0;36m"
 #define COLOR_CMD     "\033[1;37m"
 
@@ -40,18 +40,15 @@ static void print_help(void) {
     printf("%sUSAGE:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  ./ps [OPTIONS]\n\n");
     printf("%sDESCRIPTION:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  Inspect running processes, memory footprint, states, and threads via /proc.\n\n");
+    printf("  Inspect running processes with combined flags and RAM sorting.\n\n");
     printf("%sOPTIONS:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
     printf("  %s-a, --all%s            Show processes from all users\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-m, --mem%s            Sort processes by physical memory usage (RSS)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-u <USER>%s            Filter processes by username\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-p <PID>%s             Inspect a specific PID\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-h, --help%s           Display this formatted help guide and exit\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-v, --version%s        Display version and repository information\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sEXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %s./ps%s                           (Lista processos do usuario atual)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./ps -m -a%s                     (Lista todos ordenados por uso de RAM)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./ps -p 1%s                      (Inspeciona o processo init/PID 1)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  %s-h, --help%s           Display this help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("%sCOMBINED SHORT FLAGS EXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  • %s./ps -am%s                            (All users + Sort by RAM)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
 static int compare_procs(const void *a, const void *b) {
@@ -137,16 +134,31 @@ int main(int argc, char *argv[]) {
     const char *my_name = mypw ? mypw->pw_name : "unknown";
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
-            strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_help();
             return 0;
         }
+        if (strcmp(argv[i], "--all") == 0) { opt_all = 1; continue; }
+        if (strcmp(argv[i], "--mem") == 0) { opt_sort_mem = 1; continue; }
 
-        if (strcmp(argv[i], "-a") == 0 || strcmp(argv[i], "--all") == 0) opt_all = 1;
-        else if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--mem") == 0) opt_sort_mem = 1;
-        else if (strcmp(argv[i], "-u") == 0 && i + 1 < argc) filter_user = argv[++i];
-        else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) filter_pid = atoi(argv[++i]);
+        if (argv[i][0] == '-' && argv[i][1] != '\0') {
+            size_t flen = strlen(argv[i]);
+            for (size_t j = 1; j < flen; j++) {
+                char opt = argv[i][j];
+                if (opt == 'a') opt_all = 1;
+                else if (opt == 'm') opt_sort_mem = 1;
+                else if (opt == 'u') {
+                    if (j + 1 < flen) { filter_user = &argv[i][j + 1]; break; }
+                    else if (i + 1 < argc) { filter_user = argv[++i]; break; }
+                } else if (opt == 'p') {
+                    if (j + 1 < flen) { filter_pid = atoi(&argv[i][j + 1]); break; }
+                    else if (i + 1 < argc) { filter_pid = atoi(argv[++i]); break; }
+                } else if (opt == 'h') {
+                    print_help();
+                    return 0;
+                }
+            }
+        }
     }
 
     DIR *dir = opendir("/proc");
@@ -162,7 +174,6 @@ int main(int argc, char *argv[]) {
     while ((de = readdir(dir)) != NULL && count < 4096) {
         if (!isdigit(de->d_name[0])) continue;
         pid_t pid = atoi(de->d_name);
-
         if (filter_pid > 0 && pid != filter_pid) continue;
 
         ProcInfo p;
@@ -171,7 +182,6 @@ int main(int argc, char *argv[]) {
         if (!opt_all && !filter_user && filter_pid == 0) {
             if (strcmp(p.user, my_name) != 0) continue;
         }
-
         if (filter_user && strcmp(p.user, filter_user) != 0) continue;
 
         procs[count++] = p;
@@ -195,7 +205,6 @@ int main(int argc, char *argv[]) {
                COLOR_CMD, procs[i].cmd, COLOR_RESET);
     }
     printf("\n  Total de processos listados: %zu\n\n", count);
-
     free(procs);
     return 0;
 }

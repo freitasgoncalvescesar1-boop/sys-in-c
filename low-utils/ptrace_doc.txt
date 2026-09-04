@@ -1,0 +1,52 @@
+
+===============================================================================
+       PTRACE 1.0 - SYSCALL INTERCEPTOR, INLINE RUNNER & CPU REGISTERS TRACER
+===============================================================================
+
+1. OVERVIEW & PHILOSOPHY
+-------------------------------------------------------------------------------
+PTRACE 1.0 is a standalone, low-level process inspection, debugging, and 
+syscall tracing engine written in pure ANSI C.
+
+It allows developers, security researchers, and systems engineers to inspect 
+live system call streams, generate execution histograms, dump hardware CPU 
+registers, and trace inline shell scripts with zero external dependencies.
+
+
+2. EXECUTION MODES
+-------------------------------------------------------------------------------
+A. INLINE SHELL MODE (-c "<COMMAND>")
+   - Spawns /bin/sh as a monitored child process under PTRACE_TRACEME.
+   - Example: ptrace -c "calc 10 + 20"
+
+B. PID ATTACH MODE (-p <PID>)
+   - Attaches to any active running process on the system via PTRACE_ATTACH.
+   - Example: ptrace -p 1234
+
+C. DIRECT BINARY EXECUTION (-- <CMD> [ARGS...])
+   - Directly executes binaries and intercepts all system call transitions.
+   - Example: ptrace -s -- ./httpget http://google.com
+
+
+3. TELEMETRY & REPORTING
+-------------------------------------------------------------------------------
+- Summary Histogram (-s / --summary) : Outputs syscall counts, error tallies, 
+  and execution percentage breakdowns (strace -c equivalent).
+- Live Verbose Stream (-v / --verbose): Prints syscall invocations and return 
+  codes in real-time.
+- CPU Registers Snapshot (-r / --regs): Dumps architecture hardware registers 
+  (RAX/X0, RIP/PC, RSP/SP) upon syscall entries.
+
+
+4. CLI OPTIONS & SHORT FLAGS
+-------------------------------------------------------------------------------
+- -c <CMD>      : Trace inline command
+- -p <PID>      : Attach to running PID
+- -s, --summary : Print syscall summary histogram
+- -v, --verbose : Live trace output
+- -r, --regs    : Dump CPU registers snapshot
+- -o <FILE>     : Write trace report to file
+- -q, --quiet   : Suppress startup banner
+- -h, --help    : Display help guide
+
+===============================================================================
