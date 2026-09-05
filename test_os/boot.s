@@ -6,15 +6,24 @@
 .set MAGIC,    0x1BADB002
 .set CHECKSUM, -(MAGIC + FLAGS)
 
-.section .multiboot
+.section .multiboot, "a"
 .align 4
 .long MAGIC
 .long FLAGS
 .long CHECKSUM
-.long 0                     /* Linear graphics mode (offset 12) */
-.long 800                   /* Width (offset 16) */
-.long 600                   /* Height (offset 20) */
-.long 32                    /* Depth 32 bpp ARGB (offset 24) */
+
+/* Padding do A.OUT Kludge exigido quando a flag VIDEO (bit 2) esta ativa */
+.long 0                     /* header_addr */
+.long 0                     /* load_addr */
+.long 0                     /* load_end_addr */
+.long 0                     /* bss_end_addr */
+.long 0                     /* entry_addr */
+
+/* Configuracoes de Video VBE Linear Framebuffer */
+.long 0                     /* mode_type: 0 = Linear Graphics Mode */
+.long 800                   /* width */
+.long 600                   /* height */
+.long 32                    /* depth: 32 bpp ARGB */
 
 .section .bss
 .align 16

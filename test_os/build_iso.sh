@@ -27,18 +27,25 @@ gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra frees
 gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/klist.c -o build_os/klist.o
 gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kspinlock.c -o build_os/kspinlock.o
 
-# 4. Linkagem
-gcc -m32 -T test_os/linker.ld -nostdlib -ffreestanding -no-pie \
+# 4. Linkagem direta usando ld elf_i386 (layout limpo garantido nos primeiros 4KB)
+ld -m elf_i386 -T test_os/linker.ld \
   build_os/boot.o build_os/interrupts.o build_os/kernel.o \
   build_os/gdt.o build_os/idt.o build_os/ps2.o \
   build_os/kmem.o build_os/kfixed.o build_os/kprintf.o build_os/kgfx.o \
   build_os/kstring.o build_os/kvfs.o build_os/kringbuf.o build_os/klist.o build_os/kspinlock.o \
-  -lgcc -o myos.bin
+  -o myos.bin
 
-# 5. Criacao da ISO
-cp myos.bin isodir/boot/myos.bin
-cp test_os/grub.cfg isodir/boot/grub/grub.cfg
-grub-mkrescue -o myos.iso isodir
+# 5. Validacao Multiboot
+if command -v grub-file >/dev/null 2>&1; then
+    grub-file --is-x86-multiboot myos.bin
+    echo "Cabecalho Multiboot validado com sucesso!"
+fi
 
-echo "=== myos.iso gerada com sucesso! ==="
-ls -lh myos.iso
+# 6. Criacao da ISO com GRUB
+if command -v grub-mkrescue >/dev/null 2>&1; then
+    cp myos.bin isodir/boot/myos.bin
+    cp test_os/grub.cfg isodir/boot/grub/grub.cfg
+    grub-mkrescue -o myos.iso isodir
+    echo "=== myos.iso gerada com sucesso! ==="
+    ls -lh myos.iso
+fi
