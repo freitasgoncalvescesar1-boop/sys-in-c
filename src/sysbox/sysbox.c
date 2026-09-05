@@ -317,7 +317,7 @@ static void app_runner_flow(int lang_type) {
         FILE *fp = fopen(py_path, "w");
         if (fp) {
             fprintf(fp,
-                "usuario = {'nome': 'Cesar', 'xp': 9999}\n"
+                "usuario = {'nome': 'Cesar', 'xp': 99999}\n"
                 "quadrados = [x * x for x in range(1, 6)]\n"
                 "print(f'=== Executando Python 1.0-release no Desktop ===')\n"
                 "print(f'Player: {usuario[\"nome\"]} | Level XP: {usuario[\"xp\"]}')\n"

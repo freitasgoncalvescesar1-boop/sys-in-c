@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <time.h>
 #include <ctype.h>
 #include <errno.h>
@@ -49,7 +50,8 @@ static void print_help(void) {
     printf("%s[ dnsquery - RFC 1035 Raw UDP DNS Packet Inspector ]%s\n", COLOR_TITLE, COLOR_RESET);
     printf("%s========================================================%s\n", COLOR_TITLE, COLOR_RESET);
     printf("Usage:\n");
-    printf("  dnsquery <DOMAIN> [TYPE] [-s <SERVER_IP>]\n\n");
+    printf("  dnsquery <DOMAIN> [TYPE] [-s <SERVER_IP>] [-p <PORT>]\n");
+    printf("  dnsquery <DOMAIN> [TYPE] -s <SERVER_IP>:<PORT>\n\n");
     printf("Record Types Suportados:\n");
     printf("  A      (IPv4 Address - Padrao)\n");
     printf("  AAAA   (IPv6 Address)\n");
@@ -59,9 +61,9 @@ static void print_help(void) {
     printf("  NS     (Nameservers)\n\n");
     printf("Exemplos:\n");
     printf("  dnsquery google.com\n");
-    printf("  dnsquery google.com AAAA\n");
-    printf("  dnsquery github.com MX -s 8.8.8.8\n");
-    printf("  dnsquery cloudflare.com TXT\n");
+    printf("  dnsquery servidor.lan -s 127.0.0.1 5353\n");
+    printf("  dnsquery servidor.lan A -s 127.0.0.1:5353\n");
+    printf("  dnsquery github.com MX -s 8.8.8.8 -p 53\n");
     printf("%s========================================================%s\n", COLOR_TITLE, COLOR_RESET);
 }
 
@@ -71,7 +73,7 @@ static void domain_to_dns_format(const char *domain, unsigned char *buf, size_t 
     size_t pos = 0;
     size_t label_start = 0;
 
-    buf[pos++] = 0; // Placeholder para tamanho da primeira label
+    buf[pos++] = 0;
 
     for (size_t i = 0; i < len; i++) {
         if (domain[i] == '.') {
@@ -83,7 +85,7 @@ static void domain_to_dns_format(const char *domain, unsigned char *buf, size_t 
         }
     }
     buf[label_start] = (unsigned char)(pos - label_start - 1);
-    buf[pos++] = 0; // Null terminator do QNAME
+    buf[pos++] = 0;
     *out_len = pos;
 }
 
@@ -99,7 +101,6 @@ static size_t read_dns_name(const unsigned char *reader, const unsigned char *bu
     while (*reader != 0) {
         if ((size_t)(reader - buffer) >= buf_len) break;
 
-        // Ponteiro de compressão DNS (inicia com 11xxxxxx em binário = 0xC0)
         if ((*reader & 0xC0) == 0xC0) {
             uint16_t offset = ((*reader & 0x3F) << 8) | *(reader + 1);
             if (!jumped) bytes_consumed += 2;
@@ -157,19 +158,49 @@ int main(int argc, char *argv[]) {
 
     const char *domain = argv[1];
     uint16_t qtype = DNS_TYPE_A;
-    const char *server_ip = "1.1.1.1"; // Cloudflare DNS por padrão
+    char server_ip[128] = "1.1.1.1";
+    int server_port = 53;
 
     for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-            server_ip = argv[++i];
+        if ((strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--server") == 0) && i + 1 < argc) {
+            strncpy(server_ip, argv[++i], sizeof(server_ip) - 1);
+            char *colon = strchr(server_ip, ':');
+            if (colon) {
+                *colon = '\0';
+                server_port = atoi(colon + 1);
+            } else if (i + 1 < argc && isdigit((unsigned char)argv[i + 1][0])) {
+                server_port = atoi(argv[++i]);
+            }
+        } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
+            server_port = atoi(argv[++i]);
+        } else if (isdigit((unsigned char)argv[i][0])) {
+            server_port = atoi(argv[i]);
         } else {
             qtype = parse_type(argv[i]);
         }
     }
 
-    int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (server_port <= 0 || server_port > 65535) {
+        server_port = 53;
+    }
+
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", server_port);
+
+    if (getaddrinfo(server_ip, port_str, &hints, &res) != 0) {
+        fprintf(stderr, "  %s[ERRO]%s Nao foi possivel resolver servidor DNS '%s'\n", COLOR_ERR, COLOR_RESET, server_ip);
+        utilipc_close();
+        return 1;
+    }
+
+    int sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (sockfd < 0) {
         perror("socket");
+        freeaddrinfo(res);
         utilipc_close();
         return 1;
     }
@@ -177,20 +208,14 @@ int main(int argc, char *argv[]) {
     struct timeval tv = { .tv_sec = 3, .tv_usec = 0 };
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    struct sockaddr_in dest;
-    memset(&dest, 0, sizeof(dest));
-    dest.sin_family = AF_INET;
-    dest.sin_port = htons(53);
-    inet_pton(AF_INET, server_ip, &dest.sin_addr);
-
-    // 1. Montagem do Pacote DNS (RFC 1035)
+    // Montagem do Pacote DNS (RFC 1035)
     unsigned char packet[512];
     memset(packet, 0, sizeof(packet));
 
     DNSHeader *hdr = (DNSHeader *)packet;
     srand(time(NULL));
     hdr->id = (uint16_t)htons(rand() % 65535);
-    hdr->flags = htons(0x0100); // Standard query com Recursion Desired (RD = 1)
+    hdr->flags = htons(0x0100);
     hdr->qdcount = htons(1);
 
     size_t qname_len = 0;
@@ -198,24 +223,28 @@ int main(int argc, char *argv[]) {
 
     unsigned char *q_ptr = packet + sizeof(DNSHeader) + qname_len;
     *((uint16_t *)q_ptr) = htons(qtype); q_ptr += 2;
-    *((uint16_t *)q_ptr) = htons(1);     q_ptr += 2; // QCLASS 1 = IN (Internet)
+    *((uint16_t *)q_ptr) = htons(1);     q_ptr += 2;
 
     size_t packet_len = q_ptr - packet;
 
-    printf("\n  %sEnviando query DNS [%s] para '%s' via %s:53 (UDP)...%s\n",
-           COLOR_TITLE, type_to_str(qtype), domain, server_ip, COLOR_RESET);
+    printf("\n  %sEnviando query DNS [%s] para '%s' via %s:%d (UDP)...%s\n",
+           COLOR_TITLE, type_to_str(qtype), domain, server_ip, server_port, COLOR_RESET);
 
     double t_start = get_time_sec();
-    sendto(sockfd, packet, packet_len, 0, (struct sockaddr *)&dest, sizeof(dest));
+    sendto(sockfd, packet, packet_len, 0, res->ai_addr, res->ai_addrlen);
 
     unsigned char response[1024];
-    socklen_t dest_len = sizeof(dest);
-    ssize_t resp_len = recvfrom(sockfd, response, sizeof(response), 0, (struct sockaddr *)&dest, &dest_len);
+    struct sockaddr_in from_addr;
+    socklen_t from_len = sizeof(from_addr);
+    ssize_t resp_len = recvfrom(sockfd, response, sizeof(response), 0, (struct sockaddr *)&from_addr, &from_len);
     double elapsed = (get_time_sec() - t_start) * 1000.0;
+
     close(sockfd);
+    freeaddrinfo(res);
 
     if (resp_len < (ssize_t)sizeof(DNSHeader)) {
-        fprintf(stderr, "  %s[ERRO]%s Timeout na resposta do servidor DNS %s (Sem resposta em 3s)\n\n", COLOR_ERR, COLOR_RESET, server_ip);
+        fprintf(stderr, "  %s[ERRO]%s Timeout na resposta do servidor DNS %s:%d (Sem resposta em 3s)\n\n",
+                COLOR_ERR, COLOR_RESET, server_ip, server_port);
         utilipc_close();
         return 1;
     }
@@ -238,12 +267,10 @@ int main(int argc, char *argv[]) {
 
     const unsigned char *reader = response + sizeof(DNSHeader);
 
-    // Pula a seção Question na resposta
     char dummy_name[256];
     reader += read_dns_name(reader, response, resp_len, dummy_name);
-    reader += 4; // QTYPE + QCLASS
+    reader += 4;
 
-    // 2. Decodificação das Respostas (Answers)
     for (int i = 0; i < ancount; i++) {
         if ((size_t)(reader - response) >= (size_t)resp_len) break;
 
@@ -251,7 +278,7 @@ int main(int argc, char *argv[]) {
         reader += read_dns_name(reader, response, resp_len, ans_name);
 
         uint16_t type = ntohs(*((uint16_t *)reader)); reader += 2;
-        reader += 2; // CLASS
+        reader += 2;
         uint32_t ttl = ntohl(*((uint32_t *)reader));  reader += 4;
         uint16_t data_len = ntohs(*((uint16_t *)reader)); reader += 2;
 
@@ -296,7 +323,7 @@ int main(int argc, char *argv[]) {
     printf("  ---------------------------------------------------------------------------------\n\n");
 
     char log_msg[UTILIPC_MAX_MSG];
-    snprintf(log_msg, sizeof(log_msg), "dnsquery: %s [%s] (%.2fms via %s)", domain, type_to_str(qtype), elapsed, server_ip);
+    snprintf(log_msg, sizeof(log_msg), "dnsquery: %s [%s] (%.2fms via %s:%d)", domain, type_to_str(qtype), elapsed, server_ip, server_port);
     utilipc_write_status(-1, -1, -1, log_msg);
 
     utilipc_close();

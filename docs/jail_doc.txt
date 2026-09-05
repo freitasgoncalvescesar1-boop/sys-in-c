@@ -1,50 +1,59 @@
 
+
 ===============================================================================
-       JAIL 2.6 - HERMETIC SECCOMP-BPF SANDBOX, MONITOR DUMP & NERD MODE
+     JAIL 3.0 - HERMETIC DEFAULT-DENY SANDBOX & CAPABILITY GRANTS MODEL
 ===============================================================================
 
 1. OVERVIEW & PHILOSOPHY
 -------------------------------------------------------------------------------
-JAIL 2.6 is an enterprise-grade Linux Seccomp-BPF process sandbox and security 
-auditor written in pure C.
+JAIL 3.0 is an enterprise-grade Linux process sandbox built on a pure 
+Default-Deny Whitelist architecture.
 
-It traps unauthorized syscalls, prevents in-memory fileless execution (W^X), 
-locks down IPC, drops process privileges, and dumps execution forensics.
+By default, any process spawned inside JAIL operates in complete hermetic 
+lockdown (0 permissions granted). The kernel permits only the bare-minimum 
+compute syscalls (read, write to terminal, brk, mmap, futex, exit).
+
+To allow specific operations (such as internet access, writing files, or 
+spawning subprocesses), explicit capability unlock flags must be passed.
 
 
-2. ADVANCED MONITORING & AUDITING (-om & -nd)
+2. CAPABILITY GRANTS (UNLOCK FLAGS)
+-------------------------------------------------------------------------------
+- -N, --net       : Unlock network communication (sockets, DNS, HTTP, connect)
+- -W, --write     : Unlock file creation and modification (unlink, chmod, mkdir)
+- -E, --exec      : Unlock subprocess spawning (fork, vfork, clone, execve)
+- -I, --ipc       : Unlock SysV IPC & shared memory
+- -K, --signal    : Unlock signal injection & kill tampering
+- -A, --all       : Unlock all capabilities (unrestricted / permissive mode)
+- --kill          : Kill process immediately on unauthorized syscall (SIGSYS)
+
+
+3. ADVANCED MONITORING & AUDITING (-om & -nd)
 -------------------------------------------------------------------------------
 A. ONLY-MONITOR LOG DUMP (-om [FILE])
-   - Records execution metrics, blocked permissions, CPU time, and exit diagnosis 
+   - Records execution metrics, granted capabilities, CPU time, and exit status 
      into 'jail_audit.log' (or custom file).
 
 B. NERD MODE (-nd / --nerd)
    - Displays real-time hardware telemetry:
-     * CPU Architecture & register state context.
+     * CPU Architecture context.
      * User vs System CPU execution ticks.
      * Voluntary / Involuntary context switches.
-     * Peak Resident Set Size (RSS) memory consumption and page fault counts.
-
-
-3. DEFENSE TIERS
--------------------------------------------------------------------------------
-- -n, --no-net    : Block all network communication
-- -w, --no-write  : Block file modification and deletion
-- -e, --no-exec   : Block subprocess spawning (clone, fork, execve)
-- -x, --no-wx     : Block memory execution (memfd_create, userfaultfd)
-- -i, --no-ipc    : Block SysV IPC & shared memory
-- -k, --no-signal : Block kill and signal tampering
-- -s, --strict    : Complete lockdown (All blocks active)
-- -t <SECS>       : Execution timeout watchdog
-- -m <MB>         : Virtual memory ceiling (RLIMIT_AS)
+     * Peak Resident Set Size (RSS) memory consumption and page faults.
 
 
 4. EXAMPLES
 -------------------------------------------------------------------------------
-- Audit Process Execution into Log File:
-  $ jail -om -- ./httpget http://google.com
+- Pure Isolated Computation (No net, no disk write, no subprocesses):
+  $ jail -- ./calc 10 + 20
 
-- Inspect Process Registers & Telemetry (Nerd Mode):
-  $ jail -nd -s -- /bin/sh -c "echo 'Nerd Mode Test'"
+- Grant Network Access Only:
+  $ jail -N -- ./httpget http://google.com
+
+- Grant Network + Disk Write Access:
+  $ jail -NW -- ./httpget -o site.html http://google.com
+
+- Grant Subprocess Execution (Shell):
+  $ jail -E -- /bin/sh -c "whoami"
 
 ===============================================================================

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <sched.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -18,6 +19,7 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include "low.h"
 
 #define COLOR_RESET "\033[0m"
@@ -66,6 +68,55 @@
 #define AUDIT_ARCH_RISCV64 0xc00000f3
 #endif
 
+// Fallbacks de definições para arquiteturas ARM64 / x86_64
+#ifndef __NR_statfs
+#if defined(__aarch64__)
+#define __NR_statfs 43
+#elif defined(__x86_64__)
+#define __NR_statfs 137
+#endif
+#endif
+
+#ifndef __NR_fstatfs
+#if defined(__aarch64__)
+#define __NR_fstatfs 44
+#elif defined(__x86_64__)
+#define __NR_fstatfs 138
+#endif
+#endif
+
+#ifndef __NR_pread64
+#if defined(__aarch64__)
+#define __NR_pread64 67
+#elif defined(__x86_64__)
+#define __NR_pread64 17
+#endif
+#endif
+
+#ifndef __NR_pwrite64
+#if defined(__aarch64__)
+#define __NR_pwrite64 68
+#elif defined(__x86_64__)
+#define __NR_pwrite64 18
+#endif
+#endif
+
+#ifndef __NR_dup3
+#if defined(__aarch64__)
+#define __NR_dup3 24
+#elif defined(__x86_64__)
+#define __NR_dup3 292
+#endif
+#endif
+
+#ifndef __NR_pipe2
+#if defined(__aarch64__)
+#define __NR_pipe2 59
+#elif defined(__x86_64__)
+#define __NR_pipe2 293
+#endif
+#endif
+
 static pid_t g_child_pid = 0;
 static volatile sig_atomic_t g_timeout_triggered = 0;
 
@@ -86,37 +137,39 @@ static double get_time_sec(void) {
 static void print_help(void) {
     low_print_banner("jail");
     printf("%sUSAGE:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  ./jail [OPTIONS] -- <COMMAND> [ARGS...]\n\n");
-    printf("%sDESCRIPTION:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  Permissive by default Seccomp-BPF sandbox, Process Monitor (-om) & Nerd Mode (-nd).\n\n");
-    printf("%sOPTIONS (ALL ALLOWED BY DEFAULT):%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  %s-n, --no-net%s           Block all network syscalls (socket, connect, send, recv)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-w, --no-write%s         Block file modification/deletion (unlink, chmod, truncate)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-e, --no-exec%s          Block subprocess creation (fork, vfork, clone, clone3, execve)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-x, --no-wx%s            Block fileless memory execution (memfd_create, userfaultfd)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-i, --no-ipc%s           Block SysV IPC & shared memory (shmget, shmat, semop)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-k, --no-signal%s        Block signal injection & kill tampering (kill, tkill)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-s, --strict%s           Maximum lockdown (All block flags active simultaneously)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-om, --only-monitor [F]%s Dump execution metrics & security audit to file [Default: jail_audit.log]\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  ./jail [OPTIONS] -- <COMMAND> [ARGS...] (or jail [OPTIONS] -- ...)\n\n");
+    printf("%sPHILOSOPHY (DEFAULT-DENY WHITELIST):%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  By default, the sandbox is in COMPLETE LOCKDOWN (0 permissions granted).\n");
+    printf("  Use capability unlock flags (-N, -W, -E, -I, -K, -A) to explicitly grant access.\n\n");
+    printf("%sCAPABILITY UNLOCK FLAGS (PERMISSIONS):%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  %s-N, --net%s              Unlock network access (sockets, DNS, HTTP, connect, bind)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-W, --write%s            Unlock filesystem write & modifications (creat, unlink, chmod, mkdir)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-E, --exec%s             Unlock subprocess spawning (fork, vfork, clone, execve)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-I, --ipc%s              Unlock SysV IPC and shared memory\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-K, --signal%s           Unlock signal injection & kill tampering\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-A, --all%s              Unlock all capabilities (unrestricted mode)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s--kill%s                 Kill process immediately on unauthorized syscall (SIGSYS)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("\n%sAUDIT, TELEMETRY & LIMITS:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  %s-om, --only-monitor [F]%s Dump forensic execution report to file [Default: jail_audit.log]\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-nd, --nerd%s            Enable Nerd Mode: inspect CPU registers & scheduler telemetry\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-t, --timeout <SECS>%s   Kill process if execution exceeds SECS\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-t, --timeout <SECS>%s   Execution watchdog timeout in seconds\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-m, --mem <MB>%s         Virtual memory ceiling in Megabytes (RLIMIT_AS)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-f, --max-file <MB>%s    Limit maximum file size generated on disk (RLIMIT_FSIZE)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-f, --max-file <MB>%s    Limit maximum disk file size (RLIMIT_FSIZE)\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-d, --drop <UID>%s       Drop process UID/GID credentials before execution\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-q, --quiet%s            Run without status banner\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("  %s-h, --help%s             Display this help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sEXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %s./jail -om -- ./httpget http://google.com%s     (Executa com rede/disco livres e gera log)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./jail -n -- ./httpget http://google.com%s      (Bloqueia apenas a rede com EPERM)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./jail -nd -- ./calc 10 + 20%s                  (Modo Nerd com telemetria sem restrições)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  %s-q, --quiet%s            Suppress startup banner\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("  %s-h, --help%s             Display this formatted help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
+    printf("%sCOMBINED SHORT FLAGS EXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
+    printf("  • %s./jail -- ./calc 10 + 20%s                  (Confinamento Total: 0 permissoes por padrao)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./jail -N -- ./httpget http://google.com%s  (Desbloqueia APENAS a rede)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./jail -E -- sh%s                           (Desbloqueia shell e subprocessos)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
+    printf("  • %s./jail -A -- sh%s                           (Desbloqueia todas as capacidades)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
-static int setup_seccomp_jail(int no_net, int no_write, int no_exec, int no_wx, int no_ipc, int no_sig, int strict) {
-    // Se nenhuma flag de bloqueio foi passada, não instala filtros restritivos
-    if (!no_net && !no_write && !no_exec && !no_wx && !no_ipc && !no_sig && !strict) {
-        return 0;
-    }
-
+// =========================================================================
+// MOTOR SECCOMP-BPF (WHITELIST BASELINE + CAPABILITIES)
+// =========================================================================
+static int setup_seccomp_jail(int allow_net, int allow_write, int allow_exec,
+                              int allow_ipc, int allow_sig, int kill_on_violation) {
     uint32_t arch = 0;
 #if defined(__x86_64__)
     arch = AUDIT_ARCH_X86_64;
@@ -130,218 +183,418 @@ static int setup_seccomp_jail(int no_net, int no_write, int no_exec, int no_wx, 
     arch = AUDIT_ARCH_RISCV64;
 #endif
 
-    struct sock_filter filter[512];
+    struct sock_filter filter[1024];
     int pc = 0;
 
+    // 1. Verificação de Arquitetura da CPU
     if (arch != 0) {
         filter[pc++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, arch)));
         filter[pc++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, arch, 1, 0);
         filter[pc++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS);
     }
 
+    // Carrega o número da chamada de sistema
     filter[pc++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, nr)));
 
-    #define BAN_SYSCALL(sys_nr) do { \
+    #define ALLOW_SYSCALL(sys_nr) do { \
         filter[pc++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (sys_nr), 0, 1); \
-        filter[pc++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)); \
+        filter[pc++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW); \
     } while (0)
 
-    // Bloqueio de Rede (-n)
-    if (no_net || strict) {
-#ifdef __NR_socket
-        BAN_SYSCALL(__NR_socket);
+    // =====================================================================
+    // 1. SYSCALLS DE SOBREVIVÊNCIA DO RUNTIME (LIBC, BIONIC & LINKER)
+    // =====================================================================
+#ifdef __NR_exit
+    ALLOW_SYSCALL(__NR_exit);
 #endif
-#ifdef __NR_connect
-        BAN_SYSCALL(__NR_connect);
+#ifdef __NR_exit_group
+    ALLOW_SYSCALL(__NR_exit_group);
 #endif
-#ifdef __NR_bind
-        BAN_SYSCALL(__NR_bind);
+#ifdef __NR_rt_sigreturn
+    ALLOW_SYSCALL(__NR_rt_sigreturn);
 #endif
-#ifdef __NR_listen
-        BAN_SYSCALL(__NR_listen);
+#ifdef __NR_read
+    ALLOW_SYSCALL(__NR_read);
 #endif
-#ifdef __NR_accept
-        BAN_SYSCALL(__NR_accept);
+#ifdef __NR_write
+    ALLOW_SYSCALL(__NR_write);
 #endif
-#ifdef __NR_accept4
-        BAN_SYSCALL(__NR_accept4);
+#ifdef __NR_pread64
+    ALLOW_SYSCALL(__NR_pread64);
 #endif
-#ifdef __NR_sendto
-        BAN_SYSCALL(__NR_sendto);
+#ifdef __NR_pwrite64
+    ALLOW_SYSCALL(__NR_pwrite64);
 #endif
-#ifdef __NR_recvfrom
-        BAN_SYSCALL(__NR_recvfrom);
+#ifdef __NR_readv
+    ALLOW_SYSCALL(__NR_readv);
 #endif
-#ifdef __NR_sendmsg
-        BAN_SYSCALL(__NR_sendmsg);
+#ifdef __NR_writev
+    ALLOW_SYSCALL(__NR_writev);
 #endif
-#ifdef __NR_recvmsg
-        BAN_SYSCALL(__NR_recvmsg);
+#ifdef __NR_close
+    ALLOW_SYSCALL(__NR_close);
 #endif
-#ifdef __NR_socketcall
-        BAN_SYSCALL(__NR_socketcall);
+#ifdef __NR_lseek
+    ALLOW_SYSCALL(__NR_lseek);
 #endif
-    }
+#ifdef __NR_brk
+    ALLOW_SYSCALL(__NR_brk);
+#endif
+#ifdef __NR_mmap
+    ALLOW_SYSCALL(__NR_mmap);
+#endif
+#ifdef __NR_munmap
+    ALLOW_SYSCALL(__NR_munmap);
+#endif
+#ifdef __NR_mprotect
+    ALLOW_SYSCALL(__NR_mprotect);
+#endif
+#ifdef __NR_madvise
+    ALLOW_SYSCALL(__NR_madvise);
+#endif
+#ifdef __NR_mremap
+    ALLOW_SYSCALL(__NR_mremap);
+#endif
+#ifdef __NR_futex
+    ALLOW_SYSCALL(__NR_futex);
+#endif
+#ifdef __NR_set_tid_address
+    ALLOW_SYSCALL(__NR_set_tid_address);
+#endif
+#ifdef __NR_getpid
+    ALLOW_SYSCALL(__NR_getpid);
+#endif
+#ifdef __NR_getppid
+    ALLOW_SYSCALL(__NR_getppid);
+#endif
+#ifdef __NR_getuid
+    ALLOW_SYSCALL(__NR_getuid);
+#endif
+#ifdef __NR_geteuid
+    ALLOW_SYSCALL(__NR_geteuid);
+#endif
+#ifdef __NR_getgid
+    ALLOW_SYSCALL(__NR_getgid);
+#endif
+#ifdef __NR_getegid
+    ALLOW_SYSCALL(__NR_getegid);
+#endif
+#ifdef __NR_gettid
+    ALLOW_SYSCALL(__NR_gettid);
+#endif
+#ifdef __NR_getrandom
+    ALLOW_SYSCALL(__NR_getrandom);
+#endif
+#ifdef __NR_clock_gettime
+    ALLOW_SYSCALL(__NR_clock_gettime);
+#endif
+#ifdef __NR_clock_getres
+    ALLOW_SYSCALL(__NR_clock_getres);
+#endif
+#ifdef __NR_nanosleep
+    ALLOW_SYSCALL(__NR_nanosleep);
+#endif
+#ifdef __NR_clock_nanosleep
+    ALLOW_SYSCALL(__NR_clock_nanosleep);
+#endif
+#ifdef __NR_rt_sigaction
+    ALLOW_SYSCALL(__NR_rt_sigaction);
+#endif
+#ifdef __NR_rt_sigprocmask
+    ALLOW_SYSCALL(__NR_rt_sigprocmask);
+#endif
+#ifdef __NR_sigaltstack
+    ALLOW_SYSCALL(__NR_sigaltstack);
+#endif
+#ifdef __NR_ioctl
+    ALLOW_SYSCALL(__NR_ioctl);
+#endif
+#ifdef __NR_fcntl
+    ALLOW_SYSCALL(__NR_fcntl);
+#endif
+#ifdef __NR_poll
+    ALLOW_SYSCALL(__NR_poll);
+#endif
+#ifdef __NR_ppoll
+    ALLOW_SYSCALL(__NR_ppoll);
+#endif
+#ifdef __NR_select
+    ALLOW_SYSCALL(__NR_select);
+#endif
+#ifdef __NR_pselect6
+    ALLOW_SYSCALL(__NR_pselect6);
+#endif
+#ifdef __NR_fstat
+    ALLOW_SYSCALL(__NR_fstat);
+#endif
+#ifdef __NR_fstatat
+    ALLOW_SYSCALL(__NR_fstatat);
+#endif
+#ifdef __NR_newfstatat
+    ALLOW_SYSCALL(__NR_newfstatat);
+#endif
+#ifdef __NR_stat
+    ALLOW_SYSCALL(__NR_stat);
+#endif
+#ifdef __NR_lstat
+    ALLOW_SYSCALL(__NR_lstat);
+#endif
+#ifdef __NR_statfs
+    ALLOW_SYSCALL(__NR_statfs);
+#endif
+#ifdef __NR_fstatfs
+    ALLOW_SYSCALL(__NR_fstatfs);
+#endif
+#ifdef __NR_statfs64
+    ALLOW_SYSCALL(__NR_statfs64);
+#endif
+#ifdef __NR_fstatfs64
+    ALLOW_SYSCALL(__NR_fstatfs64);
+#endif
+#ifdef __NR_prctl
+    ALLOW_SYSCALL(__NR_prctl);
+#endif
+#ifdef __NR_sched_getaffinity
+    ALLOW_SYSCALL(__NR_sched_getaffinity);
+#endif
+#ifdef __NR_sched_getscheduler
+    ALLOW_SYSCALL(__NR_sched_getscheduler);
+#endif
+#ifdef __NR_uname
+    ALLOW_SYSCALL(__NR_uname);
+#endif
+#ifdef __NR_getrlimit
+    ALLOW_SYSCALL(__NR_getrlimit);
+#endif
+#ifdef __NR_prlimit64
+    ALLOW_SYSCALL(__NR_prlimit64);
+#endif
+#ifdef __NR_getcwd
+    ALLOW_SYSCALL(__NR_getcwd);
+#endif
+#ifdef __NR_access
+    ALLOW_SYSCALL(__NR_access);
+#endif
+#ifdef __NR_faccessat
+    ALLOW_SYSCALL(__NR_faccessat);
+#endif
+#ifdef __NR_faccessat2
+    ALLOW_SYSCALL(__NR_faccessat2);
+#endif
+#ifdef __NR_readlink
+    ALLOW_SYSCALL(__NR_readlink);
+#endif
+#ifdef __NR_readlinkat
+    ALLOW_SYSCALL(__NR_readlinkat);
+#endif
+#ifdef __NR_open
+    ALLOW_SYSCALL(__NR_open);
+#endif
+#ifdef __NR_openat
+    ALLOW_SYSCALL(__NR_openat);
+#endif
+#ifdef __NR_dup
+    ALLOW_SYSCALL(__NR_dup);
+#endif
+#ifdef __NR_dup2
+    ALLOW_SYSCALL(__NR_dup2);
+#endif
+#ifdef __NR_dup3
+    ALLOW_SYSCALL(__NR_dup3);
+#endif
+#ifdef __NR_pipe
+    ALLOW_SYSCALL(__NR_pipe);
+#endif
+#ifdef __NR_pipe2
+    ALLOW_SYSCALL(__NR_pipe2);
+#endif
+#ifdef __NR_capget
+    ALLOW_SYSCALL(__NR_capget);
+#endif
 
-    // Bloqueio de Modificação de Disco (-w)
-    if (no_write || strict) {
+    // =====================================================================
+    // 2. CAPACIDADE: ESCRITA E MODIFICAÇÃO DE DISCO (-W / --write)
+    // =====================================================================
+    if (allow_write) {
+#ifdef __NR_creat
+        ALLOW_SYSCALL(__NR_creat);
+#endif
 #ifdef __NR_unlink
-        BAN_SYSCALL(__NR_unlink);
+        ALLOW_SYSCALL(__NR_unlink);
 #endif
 #ifdef __NR_unlinkat
-        BAN_SYSCALL(__NR_unlinkat);
+        ALLOW_SYSCALL(__NR_unlinkat);
 #endif
 #ifdef __NR_rmdir
-        BAN_SYSCALL(__NR_rmdir);
+        ALLOW_SYSCALL(__NR_rmdir);
+#endif
+#ifdef __NR_mkdir
+        ALLOW_SYSCALL(__NR_mkdir);
+#endif
+#ifdef __NR_mkdirat
+        ALLOW_SYSCALL(__NR_mkdirat);
 #endif
 #ifdef __NR_rename
-        BAN_SYSCALL(__NR_rename);
+        ALLOW_SYSCALL(__NR_rename);
 #endif
 #ifdef __NR_renameat
-        BAN_SYSCALL(__NR_renameat);
+        ALLOW_SYSCALL(__NR_renameat);
 #endif
 #ifdef __NR_renameat2
-        BAN_SYSCALL(__NR_renameat2);
+        ALLOW_SYSCALL(__NR_renameat2);
 #endif
 #ifdef __NR_chmod
-        BAN_SYSCALL(__NR_chmod);
+        ALLOW_SYSCALL(__NR_chmod);
 #endif
 #ifdef __NR_fchmod
-        BAN_SYSCALL(__NR_fchmod);
+        ALLOW_SYSCALL(__NR_fchmod);
 #endif
 #ifdef __NR_fchmodat
-        BAN_SYSCALL(__NR_fchmodat);
+        ALLOW_SYSCALL(__NR_fchmodat);
 #endif
 #ifdef __NR_truncate
-        BAN_SYSCALL(__NR_truncate);
+        ALLOW_SYSCALL(__NR_truncate);
 #endif
 #ifdef __NR_ftruncate
-        BAN_SYSCALL(__NR_ftruncate);
+        ALLOW_SYSCALL(__NR_ftruncate);
+#endif
+#ifdef __NR_utimensat
+        ALLOW_SYSCALL(__NR_utimensat);
 #endif
     }
 
-    // Bloqueio de Subprocessos (-e)
-    if (no_exec || strict) {
-#ifdef __NR_clone
-        BAN_SYSCALL(__NR_clone);
-#endif
-#ifdef __NR_clone3
-        BAN_SYSCALL(__NR_clone3);
-#endif
-#ifdef __NR_fork
-        BAN_SYSCALL(__NR_fork);
-#endif
-#ifdef __NR_vfork
-        BAN_SYSCALL(__NR_vfork);
+    // =====================================================================
+    // 3. CAPACIDADE: SUBPROCESSOS E EXECUÇÃO (-E / --exec)
+    // =====================================================================
+    if (allow_exec) {
+#ifdef __NR_execve
+        ALLOW_SYSCALL(__NR_execve);
 #endif
 #ifdef __NR_execveat
-        BAN_SYSCALL(__NR_execveat);
+        ALLOW_SYSCALL(__NR_execveat);
+#endif
+#ifdef __NR_clone
+        ALLOW_SYSCALL(__NR_clone);
+#endif
+#ifdef __NR_clone3
+        ALLOW_SYSCALL(__NR_clone3);
+#endif
+#ifdef __NR_fork
+        ALLOW_SYSCALL(__NR_fork);
+#endif
+#ifdef __NR_vfork
+        ALLOW_SYSCALL(__NR_vfork);
+#endif
+#ifdef __NR_wait4
+        ALLOW_SYSCALL(__NR_wait4);
+#endif
+#ifdef __NR_waitid
+        ALLOW_SYSCALL(__NR_waitid);
 #endif
     }
 
-    // Anti-Shellcode em RAM (-x)
-    if (no_wx || strict) {
-#ifdef __NR_memfd_create
-        BAN_SYSCALL(__NR_memfd_create);
+    // =====================================================================
+    // 4. CAPACIDADE: REDE E CONEXÕES (-N / --net)
+    // =====================================================================
+    if (allow_net) {
+#ifdef __NR_socket
+        ALLOW_SYSCALL(__NR_socket);
 #endif
-#ifdef __NR_userfaultfd
-        BAN_SYSCALL(__NR_userfaultfd);
+#ifdef __NR_connect
+        ALLOW_SYSCALL(__NR_connect);
 #endif
-#ifdef __NR_process_vm_writev
-        BAN_SYSCALL(__NR_process_vm_writev);
+#ifdef __NR_bind
+        ALLOW_SYSCALL(__NR_bind);
+#endif
+#ifdef __NR_listen
+        ALLOW_SYSCALL(__NR_listen);
+#endif
+#ifdef __NR_accept
+        ALLOW_SYSCALL(__NR_accept);
+#endif
+#ifdef __NR_accept4
+        ALLOW_SYSCALL(__NR_accept4);
+#endif
+#ifdef __NR_sendto
+        ALLOW_SYSCALL(__NR_sendto);
+#endif
+#ifdef __NR_recvfrom
+        ALLOW_SYSCALL(__NR_recvfrom);
+#endif
+#ifdef __NR_sendmsg
+        ALLOW_SYSCALL(__NR_sendmsg);
+#endif
+#ifdef __NR_recvmsg
+        ALLOW_SYSCALL(__NR_recvmsg);
+#endif
+#ifdef __NR_getsockname
+        ALLOW_SYSCALL(__NR_getsockname);
+#endif
+#ifdef __NR_getpeername
+        ALLOW_SYSCALL(__NR_getpeername);
+#endif
+#ifdef __NR_setsockopt
+        ALLOW_SYSCALL(__NR_setsockopt);
+#endif
+#ifdef __NR_getsockopt
+        ALLOW_SYSCALL(__NR_getsockopt);
 #endif
     }
 
-    // Bloqueio de IPC (-i)
-    if (no_ipc || strict) {
+    // =====================================================================
+    // 5. CAPACIDADE: IPC E MEMÓRIA COMPARTILHADA (-I / --ipc)
+    // =====================================================================
+    if (allow_ipc) {
 #ifdef __NR_shmget
-        BAN_SYSCALL(__NR_shmget);
+        ALLOW_SYSCALL(__NR_shmget);
 #endif
 #ifdef __NR_shmat
-        BAN_SYSCALL(__NR_shmat);
+        ALLOW_SYSCALL(__NR_shmat);
 #endif
 #ifdef __NR_shmdt
-        BAN_SYSCALL(__NR_shmdt);
+        ALLOW_SYSCALL(__NR_shmdt);
 #endif
 #ifdef __NR_shmctl
-        BAN_SYSCALL(__NR_shmctl);
+        ALLOW_SYSCALL(__NR_shmctl);
 #endif
 #ifdef __NR_semget
-        BAN_SYSCALL(__NR_semget);
+        ALLOW_SYSCALL(__NR_semget);
 #endif
 #ifdef __NR_semop
-        BAN_SYSCALL(__NR_semop);
+        ALLOW_SYSCALL(__NR_semop);
 #endif
 #ifdef __NR_msgget
-        BAN_SYSCALL(__NR_msgget);
+        ALLOW_SYSCALL(__NR_msgget);
 #endif
 #ifdef __NR_msgsnd
-        BAN_SYSCALL(__NR_msgsnd);
+        ALLOW_SYSCALL(__NR_msgsnd);
 #endif
 #ifdef __NR_msgrcv
-        BAN_SYSCALL(__NR_msgrcv);
+        ALLOW_SYSCALL(__NR_msgrcv);
 #endif
     }
 
-    // Bloqueio de Sinais (-k)
-    if (no_sig || strict) {
+    // =====================================================================
+    // 6. CAPACIDADE: SINAIS E KILL (-K / --signal)
+    // =====================================================================
+    if (allow_sig) {
 #ifdef __NR_kill
-        BAN_SYSCALL(__NR_kill);
+        ALLOW_SYSCALL(__NR_kill);
 #endif
 #ifdef __NR_tkill
-        BAN_SYSCALL(__NR_tkill);
+        ALLOW_SYSCALL(__NR_tkill);
 #endif
 #ifdef __NR_tgkill
-        BAN_SYSCALL(__NR_tgkill);
+        ALLOW_SYSCALL(__NR_tgkill);
 #endif
 #ifdef __NR_pidfd_send_signal
-        BAN_SYSCALL(__NR_pidfd_send_signal);
+        ALLOW_SYSCALL(__NR_pidfd_send_signal);
 #endif
     }
 
-    if (strict) {
-#ifdef __NR_io_uring_setup
-        BAN_SYSCALL(__NR_io_uring_setup);
-#endif
-#ifdef __NR_io_uring_enter
-        BAN_SYSCALL(__NR_io_uring_enter);
-#endif
-#ifdef __NR_io_uring_register
-        BAN_SYSCALL(__NR_io_uring_register);
-#endif
-#ifdef __NR_bpf
-        BAN_SYSCALL(__NR_bpf);
-#endif
-#ifdef __NR_kcmp
-        BAN_SYSCALL(__NR_kcmp);
-#endif
-#ifdef __NR_ptrace
-        BAN_SYSCALL(__NR_ptrace);
-#endif
-#ifdef __NR_reboot
-        BAN_SYSCALL(__NR_reboot);
-#endif
-#ifdef __NR_kexec_load
-        BAN_SYSCALL(__NR_kexec_load);
-#endif
-#ifdef __NR_init_module
-        BAN_SYSCALL(__NR_init_module);
-#endif
-#ifdef __NR_finit_module
-        BAN_SYSCALL(__NR_finit_module);
-#endif
-#ifdef __NR_delete_module
-        BAN_SYSCALL(__NR_delete_module);
-#endif
-#ifdef __NR_mount
-        BAN_SYSCALL(__NR_mount);
-#endif
-#ifdef __NR_umount2
-        BAN_SYSCALL(__NR_umount2);
-#endif
-    }
-
-    filter[pc++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+    // DEFAULT-DENY: Bloqueia qualquer syscall não autorizada
+    uint32_t deny_action = kill_on_violation ? SECCOMP_RET_KILL_PROCESS : (SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA));
+    filter[pc++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, deny_action);
 
     struct sock_fprog prog = {
         .len = (unsigned short)pc,
@@ -362,7 +615,7 @@ static int setup_seccomp_jail(int no_net, int no_write, int no_exec, int no_wx, 
 }
 
 static void dump_monitor_report(const char *log_file, const char *cmd, int status, double duration, struct rusage *usage,
-                                int no_net, int no_write, int no_exec, int no_wx, int no_ipc, int no_sig, int strict) {
+                                int allow_net, int allow_write, int allow_exec, int allow_ipc, int allow_sig) {
     FILE *fp = fopen(log_file, "a");
     if (!fp) return;
 
@@ -371,27 +624,26 @@ static void dump_monitor_report(const char *log_file, const char *cmd, int statu
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
 
     fprintf(fp, "=================================================================================\n");
-    fprintf(fp, "  [ JAIL AUDIT MONITOR REPORT ] - %s\n", time_str);
+    fprintf(fp, "  [ JAIL 3.0 CAPABILITY AUDIT REPORT ] - %s\n", time_str);
     fprintf(fp, "=================================================================================\n");
     fprintf(fp, "• Comando Executado : %s\n", cmd);
     fprintf(fp, "• Duracao Total     : %.3f segundos\n", duration);
     fprintf(fp, "• Status de Saida   : ");
 
     if (WIFEXITED(status)) {
-        fprintf(fp, "Finalizado Normalmente com Codigo de Saida %d\n", WEXITSTATUS(status));
+        fprintf(fp, "Finalizado Normalmente (Exit Code: %d)\n", WEXITSTATUS(status));
     } else if (WIFSIGNALED(status)) {
         int sig = WTERMSIG(status);
         fprintf(fp, "Interrompido por Sinal %d (%s)\n", sig, strsignal(sig));
     }
 
     fprintf(fp, "---------------------------------------------------------------------------------\n");
-    fprintf(fp, "• Politicas de Seguranca Aplicadas:\n");
-    fprintf(fp, "  - Rede (Sockets)          : %s\n", (no_net || strict) ? "BLOQUEADA (EPERM)" : "Permitida (Livre)");
-    fprintf(fp, "  - Gravacao/Exclusao Disco : %s\n", (no_write || strict) ? "BLOQUEADA (EPERM)" : "Permitida (Livre)");
-    fprintf(fp, "  - Criacao de Subprocessos : %s\n", (no_exec || strict) ? "BLOQUEADA (EPERM)" : "Permitida (Livre)");
-    fprintf(fp, "  - Memoria Fileless (W^X)  : %s\n", (no_wx || strict) ? "BLOQUEADA (EPERM)" : "Permitida (Livre)");
-    fprintf(fp, "  - SysV IPC / Mem. Compart.: %s\n", (no_ipc || strict) ? "BLOQUEADA (EPERM)" : "Permitida (Livre)");
-    fprintf(fp, "  - Injecao de Sinais (Kill): %s\n", (no_sig || strict) ? "BLOQUEADA (EPERM)" : "Permitida (Livre)");
+    fprintf(fp, "• Capacidades Desbloqueadas (Granted Privileges):\n");
+    fprintf(fp, "  - Rede (-N / --net)       : %s\n", allow_net ? "DESBLOQUEADA (Permitida)" : "Bloqueada (Padrao)");
+    fprintf(fp, "  - Escrita Disco (-W)      : %s\n", allow_write ? "DESBLOQUEADA (Permitida)" : "Bloqueada (Padrao)");
+    fprintf(fp, "  - Subprocessos (-E)       : %s\n", allow_exec ? "DESBLOQUEADA (Permitida)" : "Bloqueada (Padrao)");
+    fprintf(fp, "  - SysV IPC (-I / --ipc)   : %s\n", allow_ipc ? "DESBLOQUEADA (Permitida)" : "Bloqueada (Padrao)");
+    fprintf(fp, "  - Sinais (-K / --signal)  : %s\n", allow_sig ? "DESBLOQUEADA (Permitida)" : "Bloqueada (Padrao)");
     fprintf(fp, "---------------------------------------------------------------------------------\n");
     fprintf(fp, "• Telemetria de Recursos (getrusage):\n");
     fprintf(fp, "  - Memoria Maxima (Max RSS): %ld KB\n", usage->ru_maxrss);
@@ -399,7 +651,6 @@ static void dump_monitor_report(const char *log_file, const char *cmd, int statu
     fprintf(fp, "  - Tempo de CPU (Kernel)   : %ld.%06ld s\n", (long)usage->ru_stime.tv_sec, (long)usage->ru_stime.tv_usec);
     fprintf(fp, "  - Trocas de Contexto Vol. : %ld\n", usage->ru_nvcsw);
     fprintf(fp, "  - Trocas de Contexto Invol: %ld\n", usage->ru_nivcsw);
-    fprintf(fp, "  - Falhas de Pagina (Minor): %ld\n", usage->ru_minflt);
     fprintf(fp, "=================================================================================\n\n");
     fclose(fp);
 }
@@ -435,17 +686,6 @@ static void display_nerd_session(const char *cmd, int status, double duration, s
     }
 
     printf("  ----------------------------------------------------------------------------\n");
-    printf("  %s• Registradores de CPU & Contexto de Execucao:%s\n", COLOR_NERD, COLOR_RESET);
-#if defined(__x86_64__)
-    printf("    RAX: 0x%016lx | RBX: 0x%016lx | RCX: 0x%016lx\n", (uintptr_t)status, (uintptr_t)child_pid, (uintptr_t)usage->ru_maxrss);
-    printf("    RSP: 0x%016lx | RIP: [EIP Instruction Pointer Active]\n", (uintptr_t)&status);
-#elif defined(__aarch64__)
-    printf("    X0 : 0x%016lx | X1 : 0x%016lx | X2 : 0x%016lx\n", (uintptr_t)status, (uintptr_t)child_pid, (uintptr_t)usage->ru_maxrss);
-    printf("    SP : 0x%016lx | PC : [Program Counter Filtered]\n", (uintptr_t)&status);
-#else
-    printf("    REG: [Hardware Registers Filtered by Kernel]\n");
-#endif
-    printf("  ----------------------------------------------------------------------------\n");
     printf("  %s• Telemetria de CPU & Kernel Scheduler:%s\n", COLOR_NERD, COLOR_RESET);
     printf("    - CPU Time (User) : %ld.%06ld s | CPU Time (System/Kernel): %ld.%06ld s\n",
            (long)usage->ru_utime.tv_sec, (long)usage->ru_utime.tv_usec,
@@ -458,8 +698,8 @@ static void display_nerd_session(const char *cmd, int status, double duration, s
 }
 
 int main(int argc, char *argv[]) {
-    int no_net = 0, no_write = 0, no_exec = 0, no_wx = 0;
-    int no_ipc = 0, no_sig = 0, strict = 0, quiet = 0;
+    int allow_net = 0, allow_write = 0, allow_exec = 0;
+    int allow_ipc = 0, allow_sig = 0, opt_kill = 0, quiet = 0;
     int opt_monitor = 0, opt_nerd = 0;
     char monitor_file[256] = "jail_audit.log";
     int timeout_sec = 0;
@@ -473,6 +713,18 @@ int main(int argc, char *argv[]) {
             cmd_idx = i + 1;
             break;
         }
+
+        if (strcmp(argv[i], "-N") == 0 || strcmp(argv[i], "--net") == 0) { allow_net = 1; continue; }
+        if (strcmp(argv[i], "-W") == 0 || strcmp(argv[i], "--write") == 0) { allow_write = 1; continue; }
+        if (strcmp(argv[i], "-E") == 0 || strcmp(argv[i], "--exec") == 0) { allow_exec = 1; continue; }
+        if (strcmp(argv[i], "-I") == 0 || strcmp(argv[i], "--ipc") == 0) { allow_ipc = 1; continue; }
+        if (strcmp(argv[i], "-K") == 0 || strcmp(argv[i], "--signal") == 0) { allow_sig = 1; continue; }
+        if (strcmp(argv[i], "-A") == 0 || strcmp(argv[i], "--all") == 0 || strcmp(argv[i], "--unconfined") == 0) {
+            allow_net = allow_write = allow_exec = allow_ipc = allow_sig = 1;
+            continue;
+        }
+
+        if (strcmp(argv[i], "--kill") == 0) { opt_kill = 1; continue; }
 
         if (strcmp(argv[i], "-om") == 0 || strcmp(argv[i], "--only-monitor") == 0) {
             opt_monitor = 1;
@@ -492,13 +744,6 @@ int main(int argc, char *argv[]) {
                 print_help();
                 return 0;
             }
-            if (strcmp(argv[i], "--no-net") == 0) { no_net = 1; continue; }
-            if (strcmp(argv[i], "--no-write") == 0) { no_write = 1; continue; }
-            if (strcmp(argv[i], "--no-exec") == 0) { no_exec = 1; continue; }
-            if (strcmp(argv[i], "--no-wx") == 0) { no_wx = 1; continue; }
-            if (strcmp(argv[i], "--no-ipc") == 0) { no_ipc = 1; continue; }
-            if (strcmp(argv[i], "--no-signal") == 0) { no_sig = 1; continue; }
-            if (strcmp(argv[i], "--strict") == 0) { strict = 1; continue; }
             if (strcmp(argv[i], "--quiet") == 0) { quiet = 1; continue; }
             if (strcmp(argv[i], "--timeout") == 0 && i + 1 < argc) {
                 timeout_sec = atoi(argv[++i]);
@@ -518,17 +763,18 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
+            // Flags Curtas Combinadas (ex: -N, -W, -E, -A, -NW, -NE)
             size_t flen = strlen(argv[i]);
             for (size_t j = 1; j < flen; j++) {
                 char opt = argv[i][j];
-                if (opt == 'n') no_net = 1;
-                else if (opt == 'w') no_write = 1;
-                else if (opt == 'e') no_exec = 1;
-                else if (opt == 'x') no_wx = 1;
-                else if (opt == 'i') no_ipc = 1;
-                else if (opt == 'k') no_sig = 1;
-                else if (opt == 's') strict = 1;
-                else if (opt == 'q') quiet = 1;
+                if (opt == 'N') allow_net = 1;
+                else if (opt == 'W') allow_write = 1;
+                else if (opt == 'E') allow_exec = 1;
+                else if (opt == 'I') allow_ipc = 1;
+                else if (opt == 'K') allow_sig = 1;
+                else if (opt == 'A') {
+                    allow_net = allow_write = allow_exec = allow_ipc = allow_sig = 1;
+                } else if (opt == 'q') quiet = 1;
                 else if (opt == 't') {
                     if (j + 1 < flen && isdigit((unsigned char)argv[i][j + 1])) {
                         timeout_sec = atoi(&argv[i][j + 1]);
@@ -545,29 +791,9 @@ int main(int argc, char *argv[]) {
                         mem_limit_mb = atol(argv[++i]);
                         break;
                     }
-                } else if (opt == 'f') {
-                    if (j + 1 < flen && isdigit((unsigned char)argv[i][j + 1])) {
-                        max_file_mb = atol(&argv[i][j + 1]);
-                        break;
-                    } else if (i + 1 < argc) {
-                        max_file_mb = atol(argv[++i]);
-                        break;
-                    }
-                } else if (opt == 'd') {
-                    if (j + 1 < flen && isdigit((unsigned char)argv[i][j + 1])) {
-                        drop_uid = (uid_t)atoi(&argv[i][j + 1]);
-                        has_drop_uid = 1;
-                        break;
-                    } else if (i + 1 < argc) {
-                        drop_uid = (uid_t)atoi(argv[++i]);
-                        has_drop_uid = 1;
-                        break;
-                    }
                 } else if (opt == 'h') {
                     print_help();
                     return 0;
-                } else {
-                    fprintf(stderr, "jail: opcao desconhecida '-%c'\n", opt);
                 }
             }
         } else {
@@ -582,34 +808,28 @@ int main(int argc, char *argv[]) {
     }
 
     if (!quiet) {
-        const char *net_txt = (no_net || strict) ? "\033[1;31mBLOQ\033[0m" : "\033[1;32mPERM\033[0m";
-        const char *wrt_txt = (no_write || strict) ? "\033[1;31mBLOQ\033[0m" : "\033[1;32mPERM\033[0m";
-        const char *exc_txt = (no_exec || strict) ? "\033[1;31mBLOQ\033[0m" : "\033[1;32mPERM\033[0m";
-        const char *mem_txt = (no_wx || strict) ? "\033[1;31mBLOQ\033[0m" : "\033[1;32mPERM\033[0m";
-        const char *ipc_txt = (no_ipc || strict) ? "\033[1;31mBLOQ\033[0m" : "\033[1;32mPERM\033[0m";
-        const char *sig_txt = (no_sig || strict) ? "\033[1;31mBLOQ\033[0m" : "\033[1;32mPERM\033[0m";
-
         printf("\n%s╭────────────────────────────────────────────────────────────────────────────╮%s\n", COLOR_SEC, COLOR_RESET);
-        printf("%s│%s  %s[ 🛡️ jail 2.6 - Sandbox Hermética Seccomp-BPF & Anti-Bypass Ativa ]%s      %s│%s\n",
+        printf("%s│%s  %s[ 🛡️ JAIL 3.0 - Hermetic Default-Deny Sandbox (Capabilities Model) ]%s    %s│%s\n",
                COLOR_SEC, COLOR_RESET, COLOR_OK, COLOR_RESET, COLOR_SEC, COLOR_RESET);
         printf("%s│%s  • Processo Alvo : %s%-55.55s%s %s│%s\n",
                COLOR_SEC, COLOR_RESET, COLOR_CMD, argv[cmd_idx], COLOR_RESET, COLOR_SEC, COLOR_RESET);
-        printf("%s│%s  • Rede: %s | Disco: %s | Subprocessos: %s              %s│%s\n",
-               COLOR_SEC, COLOR_RESET, net_txt, wrt_txt, exc_txt, COLOR_SEC, COLOR_RESET);
-        printf("%s│%s  • MemFD/W^X: %s | SysV IPC: %s | Signals: %s                  %s│%s\n",
-               COLOR_SEC, COLOR_RESET, mem_txt, ipc_txt, sig_txt, COLOR_SEC, COLOR_RESET);
+        printf("%s│%s  • Confinamento  : %sDefault-Deny Estrito (Tudo bloqueado exceto grants)%s    %s│%s\n",
+               COLOR_SEC, COLOR_RESET, COLOR_WARN, COLOR_RESET, COLOR_SEC, COLOR_RESET);
+        printf("%s│%s  • Rede: %s | Escrita Disco: %s | Subprocessos: %s         %s│%s\n",
+               COLOR_SEC, COLOR_RESET,
+               allow_net ? "\033[1;32mGRANTED\033[0m" : "\033[1;31mBLOCKED\033[0m",
+               allow_write ? "\033[1;32mGRANTED\033[0m" : "\033[1;31mBLOCKED\033[0m",
+               allow_exec ? "\033[1;32mGRANTED\033[0m" : "\033[1;31mBLOCKED\033[0m",
+               COLOR_SEC, COLOR_RESET);
+        printf("%s│%s  • IPC/Shm: %s | Sinais/Kill: %s                             %s│%s\n",
+               COLOR_SEC, COLOR_RESET,
+               allow_ipc ? "\033[1;32mGRANTED\033[0m" : "\033[1;31mBLOCKED\033[0m",
+               allow_sig ? "\033[1;32mGRANTED\033[0m" : "\033[1;31mBLOCKED\033[0m",
+               COLOR_SEC, COLOR_RESET);
 
         if (opt_monitor) {
             printf("%s│%s  • Audit Log File: %s%-55.55s%s %s│%s\n",
                    COLOR_SEC, COLOR_RESET, COLOR_WARN, monitor_file, COLOR_RESET, COLOR_SEC, COLOR_RESET);
-        }
-        if (mem_limit_mb > 0 || timeout_sec > 0 || max_file_mb > 0 || has_drop_uid) {
-            char limits_str[128] = "";
-            if (mem_limit_mb > 0) snprintf(limits_str + strlen(limits_str), sizeof(limits_str) - strlen(limits_str), "RAM: %ldMB ", mem_limit_mb);
-            if (timeout_sec > 0) snprintf(limits_str + strlen(limits_str), sizeof(limits_str) - strlen(limits_str), "Timeout: %ds ", timeout_sec);
-            if (max_file_mb > 0) snprintf(limits_str + strlen(limits_str), sizeof(limits_str) - strlen(limits_str), "MaxFile: %ldMB ", max_file_mb);
-            if (has_drop_uid) snprintf(limits_str + strlen(limits_str), sizeof(limits_str) - strlen(limits_str), "UID: %u ", (unsigned int)drop_uid);
-            printf("%s│%s  • Limites Rlimit: %s%-55.55s%s %s│%s\n", COLOR_SEC, COLOR_RESET, COLOR_WARN, limits_str, COLOR_RESET, COLOR_SEC, COLOR_RESET);
         }
         printf("%s╰────────────────────────────────────────────────────────────────────────────╯%s\n\n", COLOR_SEC, COLOR_RESET);
     }
@@ -628,7 +848,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (pid == 0) {
-        // --- PROCESSO FILHO CONFINADO ---
+        // Processo Filho Confinado
         if (has_drop_uid) {
             setgid(drop_uid);
             setuid(drop_uid);
@@ -648,7 +868,7 @@ int main(int argc, char *argv[]) {
             setrlimit(RLIMIT_FSIZE, &r_fsize);
         }
 
-        if (setup_seccomp_jail(no_net, no_write, no_exec, no_wx, no_ipc, no_sig, strict) < 0) {
+        if (setup_seccomp_jail(allow_net, allow_write, allow_exec, allow_ipc, allow_sig, opt_kill) < 0) {
             fprintf(stderr, "jail: falha ao inicializar o filtro Seccomp no Kernel\n");
             _exit(126);
         }
@@ -658,7 +878,7 @@ int main(int argc, char *argv[]) {
         _exit(127);
     }
 
-    // --- PROCESSO PAI MONITOR ---
+    // Processo Pai Monitor
     g_child_pid = pid;
     if (timeout_sec > 0) {
         alarm(timeout_sec);
@@ -671,17 +891,15 @@ int main(int argc, char *argv[]) {
 
     double duration = get_time_sec() - t_start;
 
-    // Relatório de Auditoria (-om)
     if (opt_monitor) {
         dump_monitor_report(monitor_file, argv[cmd_idx], status, duration, &usage,
-                            no_net, no_write, no_exec, no_wx, no_ipc, no_sig, strict);
+                            allow_net, allow_write, allow_exec, allow_ipc, allow_sig);
         if (!quiet) {
             printf("  %s[✔ MONITOR]%s Auditoria gravada em: %s%s%s\n",
                    COLOR_OK, COLOR_RESET, COLOR_WARN, monitor_file, COLOR_RESET);
         }
     }
 
-    // Sessão Nerd (-nd)
     if (opt_nerd) {
         display_nerd_session(argv[cmd_idx], status, duration, &usage, pid);
     }
@@ -697,11 +915,7 @@ int main(int argc, char *argv[]) {
     } else if (WIFSIGNALED(status)) {
         int sig = WTERMSIG(status);
         if (sig == SIGSYS) {
-            fprintf(stderr, "\n  %s[🛡️ SECCOMP VIOLATION]%s Syscall bloqueada pela sandbox.\n\n", COLOR_ERR, COLOR_RESET);
-        } else if (sig == SIGXCPU) {
-            fprintf(stderr, "\n  %s[✖ CPU LIMIT]%s Limite de tempo de CPU excedido.\n\n", COLOR_ERR, COLOR_RESET);
-        } else if (sig == SIGXFSZ) {
-            fprintf(stderr, "\n  %s[✖ FILE LIMIT]%s Limite de escrita em disco excedido.\n\n", COLOR_ERR, COLOR_RESET);
+            fprintf(stderr, "\n  %s[🛡️ SECCOMP VIOLATION]%s Syscall nao autorizada bloqueada (Default-Deny).\n\n", COLOR_ERR, COLOR_RESET);
         }
         return 128 + sig;
     }
