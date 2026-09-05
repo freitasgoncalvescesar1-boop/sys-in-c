@@ -16,6 +16,8 @@
 #include "../freestanding/ksound.c"
 #include "../freestanding/kbmp.h"
 #include "../freestanding/kbmp.c"
+#include "../freestanding/krtc.h"
+#include "../freestanding/krtc.c"
 
 static kgfx_fb_t os_fb;
 
@@ -29,32 +31,28 @@ static char current_dir[KVFS_MAX_PATH] = "/";
 static char current_user[32] = "root";
 static int is_root = 1;
 
-/* --- TERMINAL CANVAS EM RAM --- */
 #define TERM_COLS 90
 #define TERM_ROWS 36
 #define TERM_X_START 30
 #define TERM_Y_START 48
 #define TERM_CHAR_W 8
 #define TERM_CHAR_H 14
-#define TERM_WIDTH  (TERM_COLS * TERM_CHAR_W) // 720 px
-#define TERM_HEIGHT (TERM_ROWS * TERM_CHAR_H) // 504 px
+#define TERM_WIDTH  (TERM_COLS * TERM_CHAR_W)
+#define TERM_HEIGHT (TERM_ROWS * TERM_CHAR_H)
 
 static uint32_t term_canvas[TERM_WIDTH * TERM_HEIGHT];
 static int term_col = 0;
 static int term_row = 0;
 static int term_batch_mode = 0;
 
-/* Editor KEDIT */
 #define EDIT_BUF_SZ 4096
 static char edit_buf[EDIT_BUF_SZ];
 static size_t edit_len = 0;
 static char edit_filepath[KVFS_MAX_PATH] = "";
 static char edit_status_msg[64] = "";
 
-/* Visualizador BMP */
 static char view_bmp_path[KVFS_MAX_PATH] = "";
 
-/* Botões do Desktop */
 static kgfx_rect_t demo_btn = { .x = 30,  .y = 250, .w = 230, .h = 36 };
 static kgfx_rect_t game_btn = { .x = 280, .y = 250, .w = 220, .h = 36 };
 static kgfx_rect_t calc_btn = { .x = 520, .y = 250, .w = 230, .h = 36 };
@@ -64,38 +62,12 @@ static int btn_pressed_prev = 0;
 static int toast_active = 0;
 static uint32_t toast_expire_tick = 0;
 
-/* Buffer de restauração do mouse (16x16) */
 #define MOUSE_BUF_SZ 16
 static uint32_t mouse_under_buf[MOUSE_BUF_SZ * MOUSE_BUF_SZ];
 static int mouse_under_saved = 0;
 static int under_x = 0, under_y = 0, under_w = 0, under_h = 0;
 static int prev_mouse_x = 400, prev_mouse_y = 300;
 
-#if defined(__x86_64__) || defined(__i386__)
-static inline void fast_copy_dwords(void *dest, const void *src, size_t n_dwords) {
-    __asm__ __volatile__ ("cld; rep movsl"
-                          : "+D"(dest), "+S"(src), "+c"(n_dwords)
-                          : : "memory");
-}
-static inline void fast_set_dwords(void *dest, uint32_t val, size_t n_dwords) {
-    __asm__ __volatile__ ("cld; rep stosl"
-                          : "+D"(dest), "+c"(n_dwords)
-                          : "a"(val)
-                          : "memory");
-}
-#else
-static inline void fast_copy_dwords(void *dest, const void *src, size_t n_dwords) {
-    uint32_t *d = (uint32_t *)dest;
-    const uint32_t *s = (const uint32_t *)src;
-    for (size_t i = 0; i < n_dwords; i++) d[i] = s[i];
-}
-static inline void fast_set_dwords(void *dest, uint32_t val, size_t n_dwords) {
-    uint32_t *d = (uint32_t *)dest;
-    for (size_t i = 0; i < n_dwords; i++) d[i] = val;
-}
-#endif
-
-/* --- CALCULADORA GUI --- */
 #define CALC_WIN_X 240
 #define CALC_WIN_Y 110
 #define CALC_WIN_W 320
@@ -117,22 +89,18 @@ static const calc_btn_t calc_buttons[] = {
     {{CALC_WIN_X + 85,  CALC_WIN_Y + 90,  60, 40}, "^",        KGFX_PURPLE},
     {{CALC_WIN_X + 155, CALC_WIN_Y + 90,  70, 40}, "r(Bit)",   KGFX_CYAN},
     {{CALC_WIN_X + 235, CALC_WIN_Y + 90,  70, 40}, "r(Nwtn)",  KGFX_CYAN},
-
     {{CALC_WIN_X + 15,  CALC_WIN_Y + 145, 60, 40}, "7",        KGFX_NAVY},
     {{CALC_WIN_X + 85,  CALC_WIN_Y + 145, 60, 40}, "8",        KGFX_NAVY},
     {{CALC_WIN_X + 155, CALC_WIN_Y + 145, 60, 40}, "9",        KGFX_NAVY},
     {{CALC_WIN_X + 235, CALC_WIN_Y + 145, 70, 40}, "/",        KGFX_YELLOW},
-
     {{CALC_WIN_X + 15,  CALC_WIN_Y + 200, 60, 40}, "4",        KGFX_NAVY},
     {{CALC_WIN_X + 85,  CALC_WIN_Y + 200, 60, 40}, "5",        KGFX_NAVY},
     {{CALC_WIN_X + 155, CALC_WIN_Y + 200, 60, 40}, "6",        KGFX_NAVY},
     {{CALC_WIN_X + 235, CALC_WIN_Y + 200, 70, 40}, "*",        KGFX_YELLOW},
-
     {{CALC_WIN_X + 15,  CALC_WIN_Y + 255, 60, 40}, "1",        KGFX_NAVY},
     {{CALC_WIN_X + 85,  CALC_WIN_Y + 255, 60, 40}, "2",        KGFX_NAVY},
     {{CALC_WIN_X + 155, CALC_WIN_Y + 255, 60, 40}, "3",        KGFX_NAVY},
     {{CALC_WIN_X + 235, CALC_WIN_Y + 255, 70, 40}, "-",        KGFX_YELLOW},
-
     {{CALC_WIN_X + 15,  CALC_WIN_Y + 310, 60, 40}, "0",        KGFX_NAVY},
     {{CALC_WIN_X + 85,  CALC_WIN_Y + 310, 130, 40}, "=",       KGFX_GREEN},
     {{CALC_WIN_X + 235, CALC_WIN_Y + 310, 70, 40}, "+",        KGFX_YELLOW}
@@ -175,7 +143,6 @@ static int64_t int_pow(int64_t base, int64_t exp) {
     return res;
 }
 
-/* --- JOGO SNAKE --- */
 #define SNAKE_GRID_W 28
 #define SNAKE_GRID_H 20
 #define SNAKE_CELL_SZ 16
@@ -308,7 +275,6 @@ static void render_calc_window(void) {
 
     kgfx_draw_rounded_rect(&os_fb, CALC_WIN_X, CALC_WIN_Y, CALC_WIN_W, CALC_WIN_H, 10, KGFX_PURPLE, 1);
     kgfx_draw_rounded_rect(&os_fb, CALC_WIN_X + 4, CALC_WIN_Y + 4, CALC_WIN_W - 8, CALC_WIN_H - 8, 8, KGFX_NAVY, 1);
-
     kgfx_draw_rect(&os_fb, CALC_WIN_X + 4, CALC_WIN_Y + 4, CALC_WIN_W - 8, 28, KGFX_PURPLE, 1);
     kgfx_draw_string(&os_fb, CALC_WIN_X + 15, CALC_WIN_Y + 12, "Calculadora GUI (BitShift & Newton)", KGFX_WHITE, KGFX_PURPLE);
     kgfx_draw_string(&os_fb, CALC_WIN_X + CALC_WIN_W - 35, CALC_WIN_Y + 12, "[ESC]", KGFX_YELLOW, KGFX_PURPLE);
@@ -408,7 +374,7 @@ static void blit_char_to_vram(int cx, int cy) {
     for (int r = 0; r < TERM_CHAR_H; r++) {
         uint32_t *vram = &os_fb.buffer[(TERM_Y_START + cy + r) * os_fb.pitch + (TERM_X_START + cx)];
         const uint32_t *ram = &term_canvas[(cy + r) * TERM_WIDTH + cx];
-        fast_copy_dwords(vram, ram, TERM_CHAR_W);
+        for (size_t i = 0; i < TERM_CHAR_W; i++) vram[i] = ram[i];
     }
 }
 
@@ -416,7 +382,7 @@ static void flush_full_canvas_to_vram(void) {
     for (int y = 0; y < TERM_HEIGHT; y++) {
         uint32_t *vram = &os_fb.buffer[(TERM_Y_START + y) * os_fb.pitch + TERM_X_START];
         const uint32_t *ram = &term_canvas[y * TERM_WIDTH];
-        fast_copy_dwords(vram, ram, TERM_WIDTH);
+        for (size_t i = 0; i < TERM_WIDTH; i++) vram[i] = ram[i];
     }
 }
 
@@ -489,6 +455,21 @@ static void print_prompt(void) {
     kprintf("%s@utils-os:%s%c ", current_user, current_dir, is_root ? '#' : '$');
 }
 
+static void update_desktop_clock_widget(void) {
+    krtc_time_t rtc;
+    krtc_get_time(&rtc);
+
+    char dt_str[64];
+    krtc_format_datetime(&rtc, dt_str, sizeof(dt_str));
+
+    int widget_w = 210;
+    int widget_x = os_fb.width - widget_w - 20;
+    int widget_y = 18;
+
+    kgfx_draw_rect(&os_fb, widget_x, widget_y, widget_w, 24, KGFX_BLUE, 1);
+    kgfx_draw_string(&os_fb, widget_x + 8, widget_y + 6, dt_str, KGFX_YELLOW, KGFX_BLUE);
+}
+
 static void draw_gui_desktop(void) {
     mouse_under_saved = 0;
     kgfx_clear(&os_fb, KGFX_DARKGRAY);
@@ -496,6 +477,8 @@ static void draw_gui_desktop(void) {
     kgfx_draw_rounded_rect(&os_fb, 10, 10, os_fb.width - 20, os_fb.height - 20, 10, KGFX_CYAN, 0);
     kgfx_draw_rect(&os_fb, 12, 12, os_fb.width - 24, 36, KGFX_BLUE, 1);
     kgfx_draw_string_scaled(&os_fb, 20, 20, "utils-in-c OS v2.6", KGFX_WHITE, KGFX_BLUE, 2);
+
+    update_desktop_clock_widget();
 
     kgfx_draw_rect_alpha(&os_fb, 20, 60, os_fb.width - 40, 45, kgfx_argb(180, 24, 24, 37));
     kgfx_draw_string(&os_fb, 30, 75, "Pressione [ESC] para o CLI! Botoes abaixo para Apps e Jogos!", KGFX_YELLOW, 0);
@@ -511,7 +494,7 @@ static void draw_gui_desktop(void) {
     } else {
         kgfx_draw_string(&os_fb, 30, 170, "  * ATA Storage Mode  : Standalone RAM Mode", KGFX_CYAN, 0);
     }
-    kgfx_draw_string(&os_fb, 30, 190, "  * Multi-User Engine : User Authentication Active (whoami / su / adduser)", KGFX_CYAN, 0);
+    kgfx_draw_string(&os_fb, 30, 190, "  * Hardware Clock    : Real CMOS RTC (Ports 0x70/0x71) Active", KGFX_GREEN, 0);
     kgfx_draw_string(&os_fb, 30, 210, "  * Sound & Timer     : PC Speaker Audio (0x61) + PIT 100Hz Active", KGFX_CYAN, 0);
 
     draw_demo_button(0);
@@ -527,7 +510,6 @@ static void draw_gui_desktop(void) {
     }
 }
 
-/* --- SNAKE --- */
 static void spawn_snake_food(void) {
     uint32_t seed = pit_get_ticks();
     snake_food.x = (int)(seed % (SNAKE_GRID_W - 2)) + 1;
@@ -629,7 +611,6 @@ static void update_snake_game(void) {
     }
 }
 
-/* --- KEDIT & TOP --- */
 static void render_editor(void) {
     mouse_under_saved = 0;
     kgfx_clear(&os_fb, KGFX_BLACK);
@@ -792,14 +773,15 @@ static void execute_cli_command(const char *cmd) {
     term_batch_mode = 1;
 
     if (kstrcmp(cmd, "help") == 0 || kstrcmp(cmd, "?") == 0) {
-        kprintf("  [utils-in-c OS v2.6 - Comandos do Sistema (Fast Native)]\n");
-        kprintf("    • calc_gui           : Abrir Calculadora Grafica Flutuante\n");
+        kprintf("  [utils-in-c OS v2.6 - Comandos do Sistema]\n");
+        kprintf("    • date / clock       : Data e Hora reais do chip CMOS da placa-mae\n");
+        kprintf("    • uptime             : Tempo de atividade do hardware em segundos\n");
+        kprintf("    • calc_gui           : Calculadora Grafica Flutuante\n");
         kprintf("    • view <arquivo.bmp> : Visualizador de Imagens BMP\n");
         kprintf("    • snake / game       : Jogo retro Snake (Cobrinha)\n");
         kprintf("    • beep [freq] [ms]   : Emitir som no PC Speaker\n");
         kprintf("    • edit / nano <arq>  : Editor de texto visual de tela cheia\n");
         kprintf("    • top                : Monitor de processos em tempo real\n");
-        kprintf("    • uptime             : Tempo de atividade do hardware\n");
         kprintf("    • ls [dir]           : Listar arquivos e pastas\n");
         kprintf("    • cd <dir>           : Navegar entre pastas\n");
         kprintf("    • pwd                : Exibir diretorio atual\n");
@@ -816,6 +798,18 @@ static void execute_cli_command(const char *cmd) {
         kprintf("    • mem                : Memoria heap KMEM\n");
         kprintf("    • clear              : Limpar tela\n");
         kprintf("    • exit               : Voltar ao modo GUI\n");
+    } else if (kstrcmp(cmd, "date") == 0 || kstrcmp(cmd, "clock") == 0) {
+        krtc_time_t rtc;
+        krtc_get_time(&rtc);
+        char d[12], h[10];
+        krtc_format_date(&rtc, d, sizeof(d));
+        krtc_format_time(&rtc, h, sizeof(h));
+        kprintf("  [Relogio de Hardware CMOS RTC - Portas 0x70/0x71]:\n");
+        kprintf("    • Hora Real : %s\n", h);
+        kprintf("    • Data Real : %s\n", d);
+    } else if (kstrcmp(cmd, "uptime") == 0) {
+        uint32_t secs = pit_get_seconds();
+        kprintf("  Uptime: %u segundos (%02u:%02u min)\n", (unsigned int)secs, (unsigned int)(secs / 60), (unsigned int)(secs % 60));
     } else if (kstrcmp(cmd, "calc_gui") == 0 || kstrcmp(cmd, "calc") == 0) {
         term_batch_mode = 0;
         os_mode = 5;
@@ -859,9 +853,6 @@ static void execute_cli_command(const char *cmd) {
         os_mode = 3;
         render_top();
         return;
-    } else if (kstrcmp(cmd, "uptime") == 0) {
-        uint32_t secs = pit_get_seconds();
-        kprintf("  Uptime: %u segundos (%02u:%02u min)\n", (unsigned int)secs, (unsigned int)(secs / 60), (unsigned int)(secs % 60));
     } else if (kstrcmp(cmd, "whoami") == 0) {
         kprintf("  %s (UID: %d, %s)\n", current_user, is_root ? 0 : 1000, is_root ? "Superuser" : "Standard User");
     } else if (kstrncmp(cmd, "su", 2) == 0 && (cmd[2] == ' ' || cmd[2] == '\0')) {
@@ -1256,9 +1247,17 @@ void kernel_main(uint32_t magic, multiboot_info_t *mb_info) {
 
     draw_gui_desktop();
 
+    uint32_t last_clock_tick = 0;
+
     while (1) {
         uint32_t cur_ticks = pit_get_ticks();
         ksound_update(cur_ticks);
+
+        // Atualiza o relogio real na GUI a cada 1 segundo (100 ticks)
+        if (os_mode == 0 && (cur_ticks - last_clock_tick >= 100)) {
+            last_clock_tick = cur_ticks;
+            update_desktop_clock_widget();
+        }
 
         if (os_mode == 0 && toast_active && cur_ticks >= toast_expire_tick) {
             toast_active = 0;
