@@ -154,8 +154,9 @@ static MenuTab tabs[TOTAL_TABS] = {
     },
     // ABA 2: SYSTEM & STORAGE
     {
-        "🛠️", "System", 7,
+        "🛠️", "System", 8,
         {
+            {"🗜️", "zpack",     "./zpack",     "Compactador LZSS Standalone",  "Compactador de alta velocidade com janela de 64KB, match ilimitado e integridade CRC32.", "zpack -c pasta/ -o arq.zp"},
             {"📝", "tedit",     "./tedit",     "Editor com Web Server Live",   "Editor visual 2.0 com syntax highlighting, desfazer (Ctrl+Z), replace e servidor web (Ctrl+W).", "tedit index.html"},
             {"🌳", "tree",      "./tree",      "Arvore de Pastas e Arquivos",  "Desenha a hierarquia visual de diretorios com permissoes, tamanhos e cores.", "tree -L 2"},
             {"🔍", "ffind",     "./ffind",     "Buscador Recursivo Rapido",    "Localiza arquivos pelo nome ignorando pastas de sistema e arquivos pesados.", "ffind \"main.c\""},
@@ -165,43 +166,47 @@ static MenuTab tabs[TOTAL_TABS] = {
             {"🔒", "krypt",     "./krypt",     "Cofre Criptografico ChaCha20", "Criptografa e descriptografa arquivos com chave derivada e HMAC de integridade.", "krypt -e segredo.txt"}
         }
     },
-    // ABA 3: NETWORK
+    // ABA 3: NETWORK & SERVERS
     {
-        "🌐", "Network", 7,
+        "🌐", "Network", 8,
         {
+            {"🛡️", "dnsserver", "./dnsserver", "DNS Autoritativo & AdBlock",   "Servidor DNS RFC 1035 UDP com cache em RAM (<0.1ms), roteador local e sinkhole anti-anuncio.", "dnsserver"},
             {"📡", "netscan",   "./netscan",   "Radar Wi-Fi & Rede Local",     "Varre todos os IPs locais (1-254) detectando portas abertas e tipo de aparelho.", "netscan"},
             {"🚀", "speedtest", "./speedtest", "Teste de Velocidade Internet", "Mede taxa de download em Mbps e latencia em milissegundos via CDN Cloudflare.", "speedtest"},
             {"📋", "netclip",   "./netclip",   "Clipboard P2P sem Fio (Wi-Fi)","Transfere textos e arquivos diretamente entre celular e PC na mesma rede Wi-Fi.", "netclip listen"},
-            {"🔎", "dnsquery",  "./dnsquery",  "Inspetor de Pacotes DNS Raw",  "Envia queries UDP RFC 1035 (A, AAAA, MX, TXT) e analisa respostas brutas.", "dnsquery google.com A"},
+            {"🔎", "dnsquery",  "./dnsquery",  "Inspetor de Pacotes DNS Raw",  "Envia queries UDP RFC 1035 (A, AAAA, MX, TXT) com suporte a portas customizadas.", "dnsquery google.com A"},
             {"⏰", "sntp",      "./sntp",      "Sincronizador de Hora Atomica","Calcula o desvio em milissegundos do relogio local via servidores NTP.br e GPS.", "sntp"},
             {"🚪", "portcheck", "./portcheck", "Scanner de Portas TCP",        "Testa conexoes em portas individuais ou listas com medicao de latencia.", "portcheck google.com 80,443"},
             {"🧮", "snc",       "./snc",       "Calculadora de Sub-rede & CIDR","Calcula endereco de rede, broadcast, faixa de hosts e mascara binaria.", "snc 192.168.1.0/24"}
         }
     },
-    // ABA 4: MULTIMEDIA & AUDIO
+    // ABA 4: MULTIMEDIA & GRAPHICS
     {
-        "🎨", "Multimedia", 7,
+        "🎨", "Multimedia", 8,
         {
+            {"🖼️", "imgview",   "./imgview",   "Visualizador 24-bit TrueColor","Renderiza imagens BMP e JPG/JPEG diretamente no terminal via blocos half-block ANSI.", "imgview foto.jpg"},
             {"🕹️", "raycast3d", "./raycast3d", "Motor 3D Wolfenstein FPS",     "Motor grafico 3D em primeira pessoa no terminal a 60 FPS com minimapa e arma.", "raycast3d"},
+            {"🌌", "asciiray",  "./asciiray",  "Ray Tracer 3D 60 FPS (Buffer)", "Motor Ray Tracing 3D em tempo real com buffer unico, reflexos e controles de camera.", "asciiray"},
             {"🎵", "bytebeat",  "./bytebeat",  "Sintetizador 24-Bit & Guitarras","Gera audio procedural: chiptune 8-bit, guitarras Karplus, Beat Drop e agua.", "bytebeat -p 16 --play"},
-            {"🌌", "asciiray",  "./asciiray",  "Motor Ray Tracer 3D em ASCII", "Renderizador 3D em tempo real com esferas, iluminacao e reflexos TrueColor.", "asciiray"},
             {"💚", "matrix",    "./matrix",    "Chuva Digital do Matrix",      "Efeito de codigo caindo no terminal com caracteres brilhantes animados.", "matrix"},
             {"📱", "qrcli",     "./qrcli",     "Gerador de QR Code com Wi-Fi", "Gera QR Codes escaneaveis para textos, links ou conexao automatica a Wi-Fi.", "qrcli wifi"},
             {"🔢", "calc",      "./calc",      "Calculadora Matematica & Bases","Avaliador de expressoes com suporte a variaveis, trigonometria e bases bin/hex.", "calc"},
             {"✨", "jsonview",  "./jsonview",  "Formatador e Colorizador JSON","Formata e colore estruturas JSON ou converte sintaxes shorthand.", "jsonview '{\"ok\":true}'"}
         }
     },
-    // ABA 5: LOW-UTILS
+    // ABA 5: LOW-UTILS & FORENSICS
     {
-        "📦", "Low-Utils", 7,
+        "📦", "Low-Utils", 9,
         {
-            {"🐚", "lsh",       "./lsh",       "Shell com TAB Autocomplete",   "Terminal 3.0 com autocompletar TAB para comandos/pastas e historico persistente.", "lsh"},
-            {"👤", "whoami",    "./whoami",    "Auditoria Completa de Processo","Inspeciona UID, grupos, limites de memoria do kernel, FDs e terminal TTY.", "whoami -uo"},
-            {"📂", "ls",        "./ls",        "Listador de Pastas com Inodes","Lista arquivos e pastas com cores semanticas, datas e ordenacao inteligente.", "ls -l"},
-            {"📖", "cat",       "./cat",       "Concatenador de Byte Stream",  "Exibe arquivos com formatacao, numeracao de linhas e deteccao de extensao.", "cat -sz low.h"},
-            {"🗑️", "rmd",       "./rmd",       "Destruidor Seguro de Arquivos","Tritura arquivos sobrescrevendo blocos fisicos com fsync anti-forense e cripto.", "rmd -p 3 lixo.txt"},
-            {"📊", "df",        "./df",        "Uso de Disco & Barras Visuais","Exibe espaco livre e utilizado das particoes do sistema em medidores visuais.", "df -T"},
-            {"🛡️", "jail",      "./jail",      "Sandbox de Kernel Seccomp-BPF","Conseqüencia e isola comandos bloqueando chamadas de rede ou modificacao de disco.", "jail --no-net -- ./sysinfo"}
+            {"🕵️", "ptrace",     "./ptrace",    "Syscall Profiler & Auto-Log",  "Intercepta syscalls gerando relatorio executivo (RSS min/max, top chamadas) e log forense.", "ptrace -c \"whoami\""},
+            {"🛡️", "jail",       "./jail",      "Sandbox Seccomp Default-Deny", "Isola processos em confinamento total com liberacao cirurgica de capacidades (-N, -W, -E).", "jail -N -- ./httpget ..."},
+            {"🔍", "rcv",        "./rcv",       "Recuperador Forense de Inodes","Resgata arquivos unlinked do /proc e faz carving de blocos de disco por assinatura.", "rcv"},
+            {"🐚", "lsh",        "./lsh",       "Shell com TAB Autocomplete",   "Terminal 3.0 com autocompletar TAB para comandos/pastas e historico persistente.", "lsh"},
+            {"👤", "whoami",     "./whoami",    "Auditoria Completa de Processo","Inspeciona UID, grupos, limites de memoria do kernel, FDs e terminal TTY.", "whoami -uo"},
+            {"📂", "ls",         "./ls",        "Listador de Pastas com Inodes","Lista arquivos e pastas com cores semanticas, datas e ordenacao inteligente.", "ls -l"},
+            {"📖", "cat",        "./cat",       "Concatenador de Byte Stream",  "Exibe arquivos com formatacao, numeracao de linhas e deteccao de extensao.", "cat -sz low.h"},
+            {"🗑️", "rmd",        "./rmd",       "Destruidor Seguro de Arquivos","Tritura arquivos sobrescrevendo blocos fisicos com fsync anti-forense e cripto.", "rmd -p 3 lixo.txt"},
+            {"📊", "df",         "./df",        "Uso de Disco & Barras Visuais","Exibe espaco livre e utilizado das particoes do sistema em medidores visuais.", "df -T"}
         }
     },
     // ABA 6: BIOS SETUP & EXIT
@@ -280,7 +285,7 @@ static void app_runner_flow(int lang_type) {
 
     const char *tmp = get_tmp_dir();
 
-    if (lang_type == 0) { // C APP
+    if (lang_type == 0) {
         printf("\n\033[1;35m╭────────────────────────────────────────────────────────────╮\033[0m\n");
         printf("\033[1;35m│\033[0m  \033[1;36m⚡ CRIADOR & RUNNER DE APLICATIVOS EM C NATIVO\033[0m            \033[1;35m│\033[0m\n");
         printf("\033[1;35m╰────────────────────────────────────────────────────────────╯\033[0m\n\n");
@@ -306,7 +311,7 @@ static void app_runner_flow(int lang_type) {
         char cmd[1024];
         snprintf(cmd, sizeof(cmd), "gcc -O2 %s -o %s -lm && %s", c_path, bin_path, bin_path);
         (void)!system(cmd);
-    } else if (lang_type == 1) { // PYTHON APP
+    } else if (lang_type == 1) {
         printf("\n\033[1;35m╭────────────────────────────────────────────────────────────╮\033[0m\n");
         printf("\033[1;35m│\033[0m  \033[1;32m🐍 RUNNER PYTHON (pythont 1.0-release)\033[0m                    \033[1;35m│\033[0m\n");
         printf("\033[1;35m╰────────────────────────────────────────────────────────────╯\033[0m\n\n");
@@ -317,7 +322,7 @@ static void app_runner_flow(int lang_type) {
         FILE *fp = fopen(py_path, "w");
         if (fp) {
             fprintf(fp,
-                "usuario = {'nome': 'Cesar', 'xp': 99999}\n"
+                "usuario = {'nome': 'Cesar', 'xp': 9999}\n"
                 "quadrados = [x * x for x in range(1, 6)]\n"
                 "print(f'=== Executando Python 1.0-release no Desktop ===')\n"
                 "print(f'Player: {usuario[\"nome\"]} | Level XP: {usuario[\"xp\"]}')\n"
@@ -328,7 +333,7 @@ static void app_runner_flow(int lang_type) {
         char cmd[1024];
         snprintf(cmd, sizeof(cmd), "./pythont %s", py_path);
         (void)!system(cmd);
-    } else if (lang_type == 2) { // JAVA APP
+    } else if (lang_type == 2) {
         printf("\n\033[1;35m╭────────────────────────────────────────────────────────────╮\033[0m\n");
         printf("\033[1;35m│\033[0m  \033[1;33m☕ COMPILADOR & RUNNER DE APLICATIVOS JAVA\033[0m                \033[1;35m│\033[0m\n");
         printf("\033[1;35m╰────────────────────────────────────────────────────────────╯\033[0m\n\n");
@@ -375,12 +380,10 @@ static void render_desktop_monitor_frame(int box_w, int box_h, int start_x, int 
     const char *wall_names[] = {"Windows XP Bliss", "Cyber Sunset", "Sakura Blossom"};
     const BiosTheme *th = &themes[cur_theme_idx];
 
-    // 1. Top Border
     printf("\033[%d;%dH%s╭", start_y, start_x, th->border);
     for (int i = 0; i < box_w - 2; i++) printf("─");
     printf("╮%s", C_RESET);
 
-    // Title Bar
     int title_pad = box_w - 38 - (int)strlen(wall_names[wallpaper_mode]);
     if (title_pad < 0) title_pad = 0;
     printf("\033[%d;%dH%s│%s%s%s  🖥️ VIRTUAL PC DESKTOP — [%s]%*s%s%s│%s",
@@ -408,7 +411,6 @@ static void render_desktop_monitor_frame(int box_w, int box_h, int start_x, int 
         "🚪 [5] Retornar ao Menu da BIOS"
     };
 
-    // 2. Renderização sem apagar bordas
     for (int r = 0; r < inner_h; r++) {
         int line_y = start_y + 2 + r;
         double ny = (double)r / (double)inner_h;
@@ -418,17 +420,14 @@ static void render_desktop_monitor_frame(int box_w, int box_h, int start_x, int 
         int is_in_window = (r >= win_y && r < win_y + win_h && inner_w > 26);
 
         if (!is_in_window) {
-            if (wallpaper_mode == 0) { // XP Bliss
+            if (wallpaper_mode == 0) {
                 double hill_y = 0.52 + 0.14 * sin(r * 0.35 + 0.4);
-                if (ny < hill_y) {
-                    printf("\033[48;2;58;134;255m%*s\033[0m", inner_w, "");
-                } else {
-                    printf("\033[48;2;56;161;105m%*s\033[0m", inner_w, "");
-                }
-            } else if (wallpaper_mode == 1) { // Cyber Sunset
+                if (ny < hill_y) printf("\033[48;2;58;134;255m%*s\033[0m", inner_w, "");
+                else printf("\033[48;2;56;161;105m%*s\033[0m", inner_w, "");
+            } else if (wallpaper_mode == 1) {
                 if (ny < 0.6) printf("\033[48;2;131;56;236m%*s\033[0m", inner_w, "");
                 else printf("\033[48;2;255;0;110m%*s\033[0m", inner_w, "");
-            } else { // Sakura Blossom
+            } else {
                 printf("\033[48;2;245;194;231m%*s\033[0m", inner_w, "");
             }
         } else {
@@ -448,11 +447,8 @@ static void render_desktop_monitor_frame(int box_w, int box_h, int start_x, int 
                 int is_sel = (item_idx == mouse_sel);
                 int pad = win_w - 42; if (pad < 0) pad = 0;
 
-                if (is_sel) {
-                    printf("\033[1;30;48;2;166;227;161m 🖰 %-36.36s ◄\033[0m%*s", app_icons[item_idx], pad, "");
-                } else {
-                    printf("\033[0;30;48;2;240;242;245m   %-37.37s\033[0m%*s", app_icons[item_idx], pad, "");
-                }
+                if (is_sel) printf("\033[1;30;48;2;166;227;161m 🖰 %-36.36s ◄\033[0m%*s", app_icons[item_idx], pad, "");
+                else printf("\033[0;30;48;2;240;242;245m   %-37.37s\033[0m%*s", app_icons[item_idx], pad, "");
             } else {
                 printf("\033[48;2;240;242;245m%*s\033[0m", win_w, "");
             }
@@ -468,7 +464,6 @@ static void render_desktop_monitor_frame(int box_w, int box_h, int start_x, int 
         printf("\033[%d;%dH%s│%s", line_y, start_x + box_w - 1, th->border, C_RESET);
     }
 
-    // 3. Taskbar
     int taskbar_y = start_y + inner_h + 2;
     int task_pad = inner_w - 38;
     if (task_pad < 0) task_pad = 0;
@@ -478,7 +473,6 @@ static void render_desktop_monitor_frame(int box_w, int box_h, int start_x, int 
            task_pad, "", clock_str);
     printf("\033[%d;%dH%s│%s", taskbar_y, start_x + box_w - 1, th->border, C_RESET);
 
-    // Bottom Border
     printf("\033[%d;%dH%s╰", taskbar_y + 1, start_x, th->border);
     for (int i = 0; i < box_w - 2; i++) printf("─");
     printf("╯%s", C_RESET);
@@ -530,10 +524,10 @@ static void run_desktop_gui(void) {
             if (c == 27) {
                 if (n == 1) { gui_running = 0; break; }
                 if (n >= 3 && seq[1] == '[') {
-                    if (seq[2] == 'A') { // Seta CIMA
+                    if (seq[2] == 'A') {
                         if (mouse_sel > 0) mouse_sel--;
                         else mouse_sel = 4;
-                    } else if (seq[2] == 'B') { // Seta BAIXO
+                    } else if (seq[2] == 'B') {
                         if (mouse_sel < 4) mouse_sel++;
                         else mouse_sel = 0;
                     }
@@ -613,7 +607,6 @@ static void launch_tool(const char *cmd, const char *args) {
     printf("%s╰────────────────────────────────────────────────────────────────────────────╯%s\n\n", th->border, C_RESET);
 
     utilipc_send_msg("sysbox", cmd, "Launched tool from BIOS Menu");
-
     (void)!system(full_exec);
 
     printf("\n\n%s[✨ Execucao finalizada. Pressione ENTER para retornar ao SYSBOX...]%s ", th->accent_pink, C_RESET);
@@ -655,9 +648,7 @@ static void prompt_custom_arguments(void) {
             buf[0] = '\0';
             break;
         }
-        if (c == '\r' || c == '\n') {
-            break;
-        }
+        if (c == '\r' || c == '\n') break;
         if (c == 127 || c == '\b') {
             if (idx > 0) {
                 buf[--idx] = '\0';
@@ -744,12 +735,10 @@ static void render_bios_setup(void) {
     memset(&ipc_data, 0, sizeof(ipc_data));
     utilipc_read_status(&ipc_data);
 
-    // 1. Top Border
     printf("\033[%d;%dH%s╭", start_y, start_x, th->border);
     for (int i = 0; i < box_w - 2; i++) printf("─");
     printf("╮%s", C_RESET);
 
-    // Title Bar
     int head_pad = box_w - 38 - (int)strlen(th->theme_name);
     if (head_pad < 0) head_pad = 0;
     printf("\033[%d;%dH%s│%s%s%s  🌸 SYSBOX BIOS SETUP — v6.0 ✨  [%s]    [%s]%*s%s%s│%s",
@@ -758,7 +747,6 @@ static void render_bios_setup(void) {
            th->theme_name, time_str, head_pad, "", C_RESET,
            th->border, C_RESET);
 
-    // 2. Abas
     printf("\033[%d;%dH%s│%s  ", start_y + 2, start_x, th->border, C_RESET);
     int tabs_rendered_w = 2;
     for (int t = 0; t < TOTAL_TABS; t++) {
@@ -774,12 +762,10 @@ static void render_bios_setup(void) {
     if (tab_rem > 0) printf("%*s", tab_rem, "");
     printf("\033[%d;%dH%s│%s", start_y + 2, start_x + box_w - 1, th->border, C_RESET);
 
-    // Divisória
     printf("\033[%d;%dH%s├", start_y + 3, start_x, th->border);
     for (int i = 0; i < box_w - 2; i++) printf("─");
     printf("┤%s", C_RESET);
 
-    // 3. Colunas
     int split_x = (box_w * 44) / 100;
     int body_h = box_h - 6;
     int visible_items = body_h - 2;
@@ -805,7 +791,7 @@ static void render_bios_setup(void) {
                box_w - split_x - 2, "",
                C_RESET);
 
-        // Esquerda
+        // Coluna Esquerda: Itens
         if (r == 0 && scroll_offset > 0) {
             printf("\033[%d;%dH%s   ▲ Mais itens acima...%s", line_y, start_x + 2, th->accent_peach, C_RESET);
         } else if (r == visible_items + 1 && (scroll_offset + visible_items < tab->item_count)) {
@@ -828,7 +814,7 @@ static void render_bios_setup(void) {
             }
         }
 
-        // Direita
+        // Coluna Direita: Informações Detalhadas
         int right_start_x = start_x + split_x + 2;
         printf("\033[%d;%dH", line_y, right_start_x);
 
@@ -880,7 +866,6 @@ static void render_bios_setup(void) {
         }
     }
 
-    // 4. Rodapé
     printf("\033[%d;%dH%s├", start_y + 4 + body_h, start_x, th->border);
     for (int i = 0; i < box_w - 2; i++) printf("─");
     printf("┤%s", C_RESET);
@@ -964,18 +949,18 @@ int main(void) {
                 }
 
                 if (n >= 3 && seq[1] == '[') {
-                    if (seq[2] == 'A') { // Cima
+                    if (seq[2] == 'A') {
                         if (cur_item > 0) cur_item--;
                         else cur_item = tabs[cur_tab].item_count - 1;
-                    } else if (seq[2] == 'B') { // Baixo
+                    } else if (seq[2] == 'B') {
                         if (cur_item + 1 < tabs[cur_tab].item_count) cur_item++;
                         else { cur_item = 0; scroll_offset = 0; }
-                    } else if (seq[2] == 'C') { // Direita
+                    } else if (seq[2] == 'C') {
                         cur_tab = (cur_tab + 1) % TOTAL_TABS;
                         cur_item = 0;
                         scroll_offset = 0;
                         printf("\033[H\033[J");
-                    } else if (seq[2] == 'D') { // Esquerda
+                    } else if (seq[2] == 'D') {
                         cur_tab = (cur_tab - 1 + TOTAL_TABS) % TOTAL_TABS;
                         cur_item = 0;
                         scroll_offset = 0;

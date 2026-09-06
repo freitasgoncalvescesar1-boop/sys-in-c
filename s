@@ -1,3 +1,151 @@
+#!/bin/bash
+
+echo "Configurando esteira de CI para compilar a ISO do test_os..."
+
+# 1. Cria a pasta do GitHub Actions
+mkdir -p .github/workflows
+
+# 2. Cria o workflow do CI do GitHub Actions
+cat << 'EOF' > .github/workflows/build-iso.yml
+name: Build test_os Bootable ISO
+
+on:
+  push:
+    paths:
+      - 'test_os/**'
+      - 'freestanding/**'
+      - '.github/workflows/build-iso.yml'
+  pull_request:
+    paths:
+      - 'test_os/**'
+      - 'freestanding/**'
+  workflow_dispatch: # Permite disparar o build manualmente no GitHub
+
+jobs:
+  build-kernel-iso:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Dependencias de Compilacao x86 e GRUB
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-multilib \
+            binutils \
+            xorriso \
+            grub-pc-bin \
+            grub-common \
+            mtools \
+            qemu-system-x86
+
+      - name: Compilar Kernel Multiboot1 (myos.bin)
+        run: |
+          mkdir -p build_os
+          
+          # 1. Montagem dos arquivos Assembly x86
+          gcc -m32 -c test_os/boot.s -o build_os/boot.o
+          gcc -m32 -c test_os/interrupts.s -o build_os/interrupts.o
+          
+          # 2. Compilacao dos drivers do test_os
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/kernel.c -o build_os/kernel.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/gdt.c -o build_os/gdt.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/idt.c -o build_os/idt.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/ps2.c -o build_os/ps2.o
+          
+          # 3. Compilacao dos modulos freestanding
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kmem.c -o build_os/kmem.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kfixed.c -o build_os/kfixed.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kprintf.c -o build_os/kprintf.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kgfx.c -o build_os/kgfx.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kstring.c -o build_os/kstring.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kvfs.c -o build_os/kvfs.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kringbuf.c -o build_os/kringbuf.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/klist.c -o build_os/klist.o
+          gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kspinlock.c -o build_os/kspinlock.o
+          
+          # 4. Linkagem do kernel ELF de 32 bits
+          gcc -m32 -T test_os/linker.ld -nostdlib -ffreestanding -no-pie \
+            build_os/boot.o build_os/interrupts.o build_os/kernel.o \
+            build_os/gdt.o build_os/idt.o build_os/ps2.o \
+            build_os/kmem.o build_os/kfixed.o build_os/kprintf.o build_os/kgfx.o \
+            build_os/kstring.o build_os/kvfs.o build_os/kringbuf.o build_os/klist.o build_os/kspinlock.o \
+            -lgcc -o myos.bin
+
+      - name: Validar Cabecalho Multiboot
+        run: |
+          grub-file --is-x86-multiboot myos.bin
+          echo "Cabecalho Multiboot1 validado com sucesso!"
+
+      - name: Gerar Imagem ISO Bootavel (myos.iso)
+        run: |
+          mkdir -p isodir/boot/grub
+          cp myos.bin isodir/boot/myos.bin
+          cp test_os/grub.cfg isodir/boot/grub/grub.cfg
+          grub-mkrescue -o myos.iso isodir
+          ls -lh myos.iso
+
+      - name: Upload da ISO como Artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: test_os-bootable-iso
+          path: myos.iso
+          retention-days: 14
+EOF
+
+# 3. Cria o script local para compilar a ISO em maquinas Linux (test_os/build_iso.sh)
+cat << 'EOF' > test_os/build_iso.sh
+#!/bin/bash
+set -e
+
+echo "=== Compilando Kernel e Gerando myos.iso ==="
+
+mkdir -p build_os
+mkdir -p isodir/boot/grub
+
+# 1. Assembly
+gcc -m32 -c test_os/boot.s -o build_os/boot.o
+gcc -m32 -c test_os/interrupts.s -o build_os/interrupts.o
+
+# 2. Kernel C & Drivers
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/kernel.c -o build_os/kernel.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/gdt.c -o build_os/gdt.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/idt.c -o build_os/idt.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra test_os/ps2.c -o build_os/ps2.o
+
+# 3. Freestanding
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kmem.c -o build_os/kmem.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kfixed.c -o build_os/kfixed.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kprintf.c -o build_os/kprintf.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kgfx.c -o build_os/kgfx.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kstring.c -o build_os/kstring.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kvfs.c -o build_os/kvfs.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kringbuf.c -o build_os/kringbuf.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/klist.c -o build_os/klist.o
+gcc -m32 -c -ffreestanding -fno-pie -fno-stack-protector -O2 -Wall -Wextra freestanding/kspinlock.c -o build_os/kspinlock.o
+
+# 4. Linkagem
+gcc -m32 -T test_os/linker.ld -nostdlib -ffreestanding -no-pie \
+  build_os/boot.o build_os/interrupts.o build_os/kernel.o \
+  build_os/gdt.o build_os/idt.o build_os/ps2.o \
+  build_os/kmem.o build_os/kfixed.o build_os/kprintf.o build_os/kgfx.o \
+  build_os/kstring.o build_os/kvfs.o build_os/kringbuf.o build_os/klist.o build_os/kspinlock.o \
+  -lgcc -o myos.bin
+
+# 5. Criacao da ISO
+cp myos.bin isodir/boot/myos.bin
+cp test_os/grub.cfg isodir/boot/grub/grub.cfg
+grub-mkrescue -o myos.iso isodir
+
+echo "=== myos.iso gerada com sucesso! ==="
+ls -lh myos.iso
+EOF
+chmod +x test_os/build_iso.sh
+
+echo "Atualizando Makefile com target 'iso'..."
+cat << 'EOF' > Makefile
 PREFIX ?= /usr/local
 CC ?= gcc
 CFLAGS ?= -Wall -Wextra -O2 -fPIC
@@ -195,3 +343,6 @@ clean:
 	rm -rf build_os isodir
 
 .PHONY: all install uninstall clean free iso
+EOF
+
+echo "CI configurado com sucesso em .github/workflows/build-iso.yml!"
