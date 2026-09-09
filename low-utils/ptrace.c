@@ -62,10 +62,6 @@ static void print_help(void) {
     printf("  %s-o <FILE>%s             Specify custom output log file [Default: <process>_logs.log]\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-q, --quiet%s           Suppress top header banner\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
     printf("  %s-h, --help%s            Display this formatted help guide and exit\n\n", LOW_COLOR_BIN, LOW_COLOR_RESET);
-    printf("%sEXAMPLES:%s\n", LOW_COLOR_LABEL, LOW_COLOR_RESET);
-    printf("  • %s./ptrace -c \"whoami\"%s                  (Gera 'whoami_logs.log' e exibe resumo ordenado)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./ptrace -c \"calc 10 + 20\"%s            (Analisa tempo, RSS min/max e syscalls)\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
-    printf("  • %s./ptrace -- ./httpget http://google.com%s(Rastreia binario direto)\n\n", LOW_COLOR_TAG, LOW_COLOR_RESET);
 }
 
 // Tabela de Nomes de Syscalls Multiplataforma (x86_64 / ARM64 / ARM32)
@@ -84,11 +80,13 @@ static const char *get_syscall_name(long nr) {
         case 60: return "exit"; case 61: return "wait4"; case 62: return "kill"; case 72: return "fcntl";
         case 79: return "getcwd"; case 80: return "chdir"; case 83: return "mkdir"; case 84: return "rmdir";
         case 87: return "unlink"; case 88: return "symlink"; case 89: return "readlink"; case 90: return "chmod";
-        case 137: return "statfs"; case 138: return "fstatfs"; case 158: return "arch_prctl";
-        case 202: return "futex"; case 218: return "set_tid_address"; case 231: return "exit_group";
-        case 257: return "openat"; case 262: return "newfstatat"; case 263: return "unlinkat";
-        case 275: return "splice"; case 318: return "getrandom"; case 319: return "memfd_create";
-        case 435: return "clone3";
+        case 101: return "ptrace"; case 102: return "getuid"; case 104: return "getgid";
+        case 107: return "geteuid"; case 108: return "getegid"; case 115: return "getgroups";
+        case 124: return "getsid"; case 137: return "statfs"; case 138: return "fstatfs";
+        case 158: return "arch_prctl"; case 202: return "futex"; case 218: return "set_tid_address";
+        case 231: return "exit_group"; case 257: return "openat"; case 262: return "newfstatat";
+        case 263: return "unlinkat"; case 275: return "splice"; case 318: return "getrandom";
+        case 319: return "memfd_create"; case 435: return "clone3";
 #elif defined(__aarch64__)
         case 17: return "getcwd"; case 23: return "dup"; case 24: return "dup3"; case 25: return "fcntl";
         case 29: return "ioctl"; case 34: return "mkdirat"; case 35: return "unlinkat"; case 36: return "symlinkat";
@@ -98,23 +96,27 @@ static const char *get_syscall_name(long nr) {
         case 68: return "pwrite64"; case 73: return "ppoll"; case 78: return "readlinkat"; case 79: return "fstat";
         case 80: return "fstatat"; case 93: return "exit"; case 94: return "exit_group";
         case 96: return "set_tid_address"; case 98: return "futex"; case 113: return "clock_gettime";
-        case 114: return "clock_getres"; case 115: return "clock_nanosleep"; case 120: return "sched_getscheduler";
-        case 122: return "sched_setaffinity"; case 123: return "sched_getaffinity"; case 129: return "kill";
-        case 130: return "tkill"; case 131: return "tgkill"; case 132: return "sigaltstack";
+        case 114: return "clock_getres"; case 115: return "clock_nanosleep"; case 117: return "ptrace";
+        case 120: return "sched_getscheduler"; case 122: return "sched_setaffinity"; case 123: return "sched_getaffinity";
+        case 129: return "kill"; case 130: return "tkill"; case 131: return "tgkill"; case 132: return "sigaltstack";
         case 134: return "rt_sigaction"; case 135: return "rt_sigprocmask"; case 139: return "rt_sigreturn";
-        case 160: return "uname"; case 167: return "prctl"; case 172: return "getpid"; case 173: return "getppid";
-        case 174: return "getuid"; case 175: return "geteuid"; case 176: return "getgid"; case 177: return "getegid";
-        case 178: return "getrlimit"; case 179: return "setrlimit"; case 198: return "socket"; case 200: return "bind";
-        case 201: return "listen"; case 202: return "accept"; case 203: return "connect"; case 204: return "getsockname";
-        case 205: return "getpeername"; case 206: return "sendto"; case 207: return "recvfrom";
-        case 208: return "setsockopt"; case 209: return "getsockopt"; case 214: return "brk";
-        case 215: return "munmap"; case 216: return "mremap"; case 220: return "clone"; case 221: return "execve";
-        case 222: return "mmap"; case 226: return "mprotect"; case 233: return "madvise"; case 260: return "wait4";
-        case 261: return "prlimit64"; case 278: return "getrandom"; case 279: return "memfd_create";
-        case 435: return "clone3";
+        case 155: return "getpgid"; case 156: return "getsid"; case 158: return "getgroups";
+        case 160: return "uname"; case 165: return "getrusage"; case 167: return "prctl";
+        case 172: return "getpid"; case 173: return "getppid"; case 174: return "getuid";
+        case 175: return "geteuid"; case 176: return "getgid"; case 177: return "getegid";
+        case 178: return "getrlimit"; case 179: return "setrlimit"; case 198: return "socket";
+        case 200: return "bind"; case 201: return "listen"; case 202: return "accept";
+        case 203: return "connect"; case 204: return "getsockname"; case 205: return "getpeername";
+        case 206: return "sendto"; case 207: return "recvfrom"; case 208: return "setsockopt";
+        case 209: return "getsockopt"; case 214: return "brk"; case 215: return "munmap";
+        case 216: return "mremap"; case 220: return "clone"; case 221: return "execve";
+        case 222: return "mmap"; case 226: return "mprotect"; case 233: return "madvise";
+        case 260: return "wait4"; case 261: return "prlimit64"; case 278: return "getrandom";
+        case 279: return "memfd_create"; case 435: return "clone3";
 #else
         case 1: return "exit"; case 3: return "read"; case 4: return "write"; case 5: return "open";
-        case 6: return "close"; case 11: return "execve"; case 20: return "getpid"; case 45: return "brk";
+        case 6: return "close"; case 11: return "execve"; case 20: return "getpid"; case 26: return "ptrace";
+        case 45: return "brk";
 #endif
         default: return "sys_unknown";
     }
@@ -237,7 +239,6 @@ static void render_executive_summary(const char *target_desc, int status, double
                                      unsigned long min_rss_kb, unsigned long max_rss_kb,
                                      struct rusage *usage, unsigned long total_calls,
                                      const char *log_filename) {
-    // Ordena as syscalls da mais usada para a menos usada
     qsort(g_stats, g_stat_count, sizeof(SyscallStat), compare_stats_desc);
 
     printf("\n%s╭────────────────────────────────────────────────────────────────────────────╮%s\n", COLOR_TITLE, COLOR_RESET);
@@ -245,7 +246,6 @@ static void render_executive_summary(const char *target_desc, int status, double
            COLOR_TITLE, COLOR_RESET, COLOR_OK, COLOR_RESET, COLOR_TITLE, COLOR_RESET);
     printf("%s├────────────────────────────────────────────────────────────────────────────┤%s\n", COLOR_TITLE, COLOR_RESET);
 
-    // 1. Status & Duração
     printf("  %s• Alvo / Comando   :%s %s%s%s\n", COLOR_SYS, COLOR_RESET, COLOR_TITLE, target_desc, COLOR_RESET);
     printf("  %s• Tempo de Execução:%s %s%.4f segundos%s\n", COLOR_SYS, COLOR_RESET, COLOR_OK, duration, COLOR_RESET);
 
@@ -259,7 +259,6 @@ static void render_executive_summary(const char *target_desc, int status, double
                COLOR_SYS, COLOR_RESET, COLOR_WARN, sig, strsignal(sig), COLOR_RESET);
     }
 
-    // 2. Memória RSS (Mínima e Máxima/Pico)
     if (max_rss_kb == 0 && usage->ru_maxrss > 0) max_rss_kb = usage->ru_maxrss;
     if (min_rss_kb == 0 || min_rss_kb > max_rss_kb) min_rss_kb = (max_rss_kb > 64) ? max_rss_kb / 2 : max_rss_kb;
 
@@ -277,7 +276,6 @@ static void render_executive_summary(const char *target_desc, int status, double
     printf("  %s• Trocas de Context:%s %ld voluntárias | %ld involuntárias\n",
            COLOR_WARN, COLOR_RESET, usage->ru_nvcsw, usage->ru_nivcsw);
 
-    // 3. Tabela de Syscalls Mais Usadas (Top Ranking Ordenado)
     printf("  ----------------------------------------------------------------------------\n");
     printf("  %s[ SYSCALLS MAIS UTILIZADAS (RANKING ORDENADO) ]%s\n\n", COLOR_TITLE, COLOR_RESET);
     printf("  %s%-6s %-24s %-12s %-10s %s%s\n", COLOR_SYS, "NUM", "SYSCALL", "CHAMADAS", "ERROS", "% TOTAL", COLOR_RESET);
@@ -467,14 +465,12 @@ int main(int argc, char *argv[]) {
 
         if (WIFSTOPPED(status) && WSTOPSIG(status) == (SIGTRAP | 0x80)) {
             if (!in_syscall) {
-                // Entrada da Syscall
                 uintptr_t pc = 0, sp = 0, arg0 = 0;
                 current_sys = get_syscall_context(tracee_pid, &pc, &sp, &arg0);
                 if (current_sys >= 0) {
                     in_syscall = 1;
                     total_calls++;
 
-                    // Amostragem de memória RSS em tempo de execução
                     unsigned long cur_rss = sample_process_rss_kb(tracee_pid);
                     if (cur_rss > 0) {
                         if (min_rss_kb == 0 || cur_rss < min_rss_kb) min_rss_kb = cur_rss;
@@ -487,11 +483,9 @@ int main(int argc, char *argv[]) {
                     }
                 }
             } else {
-                // Saída da Syscall (Valor de Retorno)
                 long ret = get_syscall_return(tracee_pid);
                 record_syscall(current_sys, ret);
 
-                // Grava linha detalhada no arquivo de log (sem poluir o terminal)
                 if (log_fp) {
                     fprintf(log_fp, "[%05lu] %-20s() = %ld%s\n",
                             total_calls, get_syscall_name(current_sys), ret,

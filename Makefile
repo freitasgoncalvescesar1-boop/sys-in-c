@@ -4,10 +4,10 @@ CFLAGS ?= -Wall -Wextra -O2 -fPIC
 LDFLAGS_IPC = -L. -lutilipc -Wl,-rpath,. -lpthread
 
 LIB_IPC = libutilipc.so
-SRC_TOOLS = sysbox calc passgen bigfiles portcheck hashcalc b64 sysinfo org netinfo ffind ipcmon simplehost watchcmd strutils fdup deview cpuplot qrcli bench get-info utils-help netclip snc jsonview speedtest httpget tedit netscan dnsquery diskbench krypt rawcat hwcaps matrix pwr sntp tree pythont chip8 bytebeat disasm asciiray imgview zpack iotscan vsec
+SRC_TOOLS = sysbox calc passgen bigfiles portcheck hashcalc b64 sysinfo org netinfo ffind ipcmon simplehost watchcmd strutils fdup deview cpuplot qrcli bench get-info utils-help netclip snc jsonview speedtest httpget tedit netscan dnsquery diskbench krypt rawcat hwcaps matrix pwr sntp tree pythont chip8 bytebeat disasm asciiray imgview zpack iotscan vsec date
 HEAVY_TOOLS = raycast3d dnsserver
-LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace rcv printenv
-INSTALL_LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace rcv printenv
+LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace rcv printenv ldate
+INSTALL_LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace rcv printenv ldate
 ALL_TOOLS = $(SRC_TOOLS) $(HEAVY_TOOLS) $(LOW_TOOLS)
 
 all: $(LIB_IPC) $(ALL_TOOLS)
@@ -117,6 +117,8 @@ iotscan: src/iotscan/iotscan.c $(LIB_IPC)
 	$(CC) $(CFLAGS) src/iotscan/iotscan.c -o iotscan $(LDFLAGS_IPC)
 vsec: src/vsec/vsec.c $(LIB_IPC)
 	$(CC) $(CFLAGS) src/vsec/vsec.c -o vsec $(LDFLAGS_IPC) -lm
+date: src/date/date.c $(LIB_IPC)
+	$(CC) $(CFLAGS) src/date/date.c -o date $(LDFLAGS_IPC) -lm
 
 # --- LOW-UTILS ---
 chmod: low-utils/chmod.c low-utils/low.h
@@ -169,6 +171,8 @@ rcv: low-utils/rcv.c low-utils/low.h
 	$(CC) $(CFLAGS) low-utils/rcv.c -o rcv
 printenv: low-utils/printenv.c low-utils/low.h
 	$(CC) $(CFLAGS) low-utils/printenv.c -o printenv
+ldate: low-utils/ldate.c low-utils/low.h
+	$(CC) $(CFLAGS) low-utils/ldate.c -o ldate
 
 # --- FREESTANDING / OS ---
 free: freestanding/kmem.c freestanding/kfixed.c freestanding/kprintf.c freestanding/kgfx.c freestanding/kringbuf.c freestanding/kstring.c freestanding/klist.c freestanding/kspinlock.c freestanding/kvfs.c freestanding/kata.c freestanding/kdiskfs.c freestanding/ksound.c freestanding/kbmp.c freestanding/main_test.c freestanding/kcalc.c freestanding/kdiv64.c
