@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <fcntl.h>
 #include "../libutilipc/utilipc.h"
 
 #define COLOR_RESET   "\033[0m"
