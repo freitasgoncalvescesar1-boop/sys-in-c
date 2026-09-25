@@ -4,7 +4,7 @@ CFLAGS ?= -Wall -Wextra -O2 -fPIC
 LDFLAGS_IPC = -L. -lutilipc -Wl,-rpath,. -lpthread
 
 LIB_IPC = libutilipc.so
-SRC_TOOLS = sysbox calc passgen bigfiles portcheck hashcalc b64 sysinfo org netinfo ffind ipcmon simplehost watchcmd strutils fdup deview cpuplot qrcli bench get-info utils-help netclip snc jsonview speedtest httpget tedit netscan dnsquery diskbench krypt rawcat hwcaps matrix pwr sntp tree pythont chip8 bytebeat disasm asciiray imgview zpack iotscan vsec date
+SRC_TOOLS = sysbox calc passgen bigfiles portcheck hashcalc b64 sysinfo org netinfo ffind ipcmon simplehost watchcmd strutils fdup deview cpuplot qrcli bench get-info utils-help netclip snc jsonview speedtest httpget tedit netscan dnsquery diskbench krypt rawcat hwcaps matrix pwr sntp tree pythont chip8 bytebeat disasm asciiray imgview zpack iotscan vsec date syscall
 HEAVY_TOOLS = raycast3d dnsserver
 LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace rcv printenv ldate
 INSTALL_LOW_TOOLS = chmod cat rmd cp xxd ln stat ls df peekmem pv ps kill whoami ltop ping magic lsh mv mkdir jail which ptrace rcv printenv ldate
@@ -119,6 +119,8 @@ vsec: src/vsec/vsec.c $(LIB_IPC)
 	$(CC) $(CFLAGS) src/vsec/vsec.c -o vsec $(LDFLAGS_IPC) -lm
 date: src/date/date.c $(LIB_IPC)
 	$(CC) $(CFLAGS) src/date/date.c -o date $(LDFLAGS_IPC) -lm
+syscall: src/syscall/syscall.c
+	$(CC) $(CFLAGS) src/syscall/syscall.c -o syscall
 
 # --- LOW-UTILS ---
 chmod: low-utils/chmod.c low-utils/low.h
