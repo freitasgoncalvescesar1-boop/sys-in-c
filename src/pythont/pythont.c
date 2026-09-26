@@ -690,6 +690,7 @@ static void transform_advanced_expressions(char *expr) {
 
 static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
     out_fmt[0] = '\0'; out_args[0] = '\0';
+    size_t fmt_pos = 0, args_pos = 0;
     const char *p = fstr;
     if (*p == 'f' || *p == 'F') p++;
     char quote = *p;
@@ -715,13 +716,13 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
             }
             raw_expr[eidx] = '\0';
             if (*p != '}') {
-                fprintf(stderr, "pythont: f-string expression is too large or unterminated\n");
+                fprintf(stderr, "pythont: f-string expression is too large or unterminated\\n");
                 return;
             }
             p++;
 
             char clean_expr[512];
-            strncpy(clean_expr, raw_expr, sizeof(clean_expr) - 1);
+            snprintf(clean_expr, sizeof(clean_expr), "%s", raw_expr);
             normalize_quotes_in_str(clean_expr);
             replace_operators(clean_expr);
             transform_advanced_expressions(clean_expr);
@@ -732,11 +733,12 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
             symbol_t *sym = find_symbol(trim_e);
 
             if (sym && sym->type == VAR_LIST) {
-                strcat(fmt_buf, "%s");
-                if (arg_cnt > 0) strcat(args_buf, ", ");
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%s")) return;
+                if (arg_cnt > 0 && !append_fragment(args_buf, &args_pos, sizeof(args_buf), ", ")) return;
                 char list_call[1100];
-                snprintf(list_call, sizeof(list_call), "py_list_repr(%s, len_%s)", trim_e, trim_e);
-                strcat(args_buf, list_call);
+                int n = snprintf(list_call, sizeof(list_call), "py_list_repr(%s, len_%s)", trim_e, trim_e);
+                if (n < 0 || (size_t)n >= sizeof(list_call) ||
+                    !append_fragment(args_buf, &args_pos, sizeof(args_buf), list_call)) return;
                 arg_cnt++;
                 continue;
             }
@@ -744,38 +746,49 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
             int is_str = is_string_expression(trim_e);
             int is_flt = is_float_expression(trim_e);
 
-            if (is_str) strcat(fmt_buf, "%s");
-            else if (is_flt) strcat(fmt_buf, "%f");
-            else strcat(fmt_buf, "%lld");
+            if (is_str) {
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%s")) return;
+            } else if (is_flt) {
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%f")) return;
+            } else {
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%lld")) return;
+            }
 
-            if (arg_cnt > 0) strcat(args_buf, ", ");
+            if (arg_cnt > 0 && !append_fragment(args_buf, &args_pos, sizeof(args_buf), ", ")) return;
 
             if (is_str) {
-                strcat(args_buf, trim_e);
+                if (!append_fragment(args_buf, &args_pos, sizeof(args_buf), trim_e)) return;
             } else if (is_flt) {
                 char cast_arg[544];
-                snprintf(cast_arg, sizeof(cast_arg), "(double)(%s)", trim_e);
-                strcat(args_buf, cast_arg);
+                int n = snprintf(cast_arg, sizeof(cast_arg), "(double)(%s)", trim_e);
+                if (n < 0 || (size_t)n >= sizeof(cast_arg) ||
+                    !append_fragment(args_buf, &args_pos, sizeof(args_buf), cast_arg)) return;
             } else {
                 char cast_arg[544];
-                snprintf(cast_arg, sizeof(cast_arg), "(long long)(%s)", trim_e);
-                strcat(args_buf, cast_arg);
+                int n = snprintf(cast_arg, sizeof(cast_arg), "(long long)(%s)", trim_e);
+                if (n < 0 || (size_t)n >= sizeof(cast_arg) ||
+                    !append_fragment(args_buf, &args_pos, sizeof(args_buf), cast_arg)) return;
             }
             arg_cnt++;
         } else {
-            size_t flen = strlen(fmt_buf);
-            if (*p == '%') { fmt_buf[flen] = '%'; fmt_buf[flen+1] = '%'; fmt_buf[flen+2] = '\0'; }
-            else { fmt_buf[flen] = *p; fmt_buf[flen+1] = '\0'; }
+            if (*p == '%') {
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%%")) return;
+            } else {
+                char ch[2] = { *p, '\0' };
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), ch)) return;
+            }
             p++;
         }
     }
-    strcpy(out_fmt, fmt_buf);
-    strcpy(out_args, args_buf);
+
+    snprintf(out_fmt, 1024, "%s", fmt_buf);
+    snprintf(out_args, 2048, "%s", args_buf);
 }
 
 static void transpile_print(const char *args_str) {
     char fmt_str[1024] = "";
     char val_list[4096] = "";
+    size_t fmt_pos = 0, val_pos = 0;
     int first = 1;
 
     const char *p = args_str;
@@ -805,7 +818,10 @@ static void transpile_print(const char *args_str) {
 
         size_t token_len = p - token_start;
         char token[1024];
-        if (token_len >= sizeof(token)) token_len = sizeof(token) - 1;
+        if (token_len >= sizeof(token)) {
+            fprintf(stderr, "pythont: print argument is too large\\n");
+            return;
+        }
         memcpy(token, token_start, token_len);
         token[token_len] = '\0';
         if (*p == ',') p++;
@@ -819,17 +835,18 @@ static void transpile_print(const char *args_str) {
         if ((t[0] == 'f' || t[0] == 'F') && (t[1] == '"' || t[1] == '\'')) {
             char f_fmt[512], f_args[2048];
             transpile_fstring(t, f_fmt, f_args);
-            if (!first) strcat(fmt_str, " ");
-            strcat(fmt_str, f_fmt);
+            if (!first && !append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), " ")) return;
+            if (!append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), f_fmt)) return;
             if (strlen(f_args) > 0) {
-                if (!first && strlen(val_list) > 0) strcat(val_list, ", ");
-                strcat(val_list, f_args);
+                if (!first && strlen(val_list) > 0 &&
+                    !append_fragment(val_list, &val_pos, sizeof(val_list), ", ")) return;
+                if (!append_fragment(val_list, &val_pos, sizeof(val_list), f_args)) return;
             }
             first = 0;
             continue;
         }
 
-        if (!first) strcat(fmt_str, " ");
+        if (!first && !append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), " ")) return;
 
         normalize_quotes_in_str(t);
         replace_operators(t);
@@ -838,11 +855,13 @@ static void transpile_print(const char *args_str) {
         symbol_t *sym = find_symbol(t);
 
         if (sym && sym->type == VAR_LIST) {
-            strcat(fmt_str, "%s");
-            if (!first && strlen(val_list) > 0) strcat(val_list, ", ");
+            if (!append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), "%s")) return;
+            if (!first && strlen(val_list) > 0 &&
+                !append_fragment(val_list, &val_pos, sizeof(val_list), ", ")) return;
             char list_str_call[2100];
-            snprintf(list_str_call, sizeof(list_str_call), "py_list_repr(%s, len_%s)", t, t);
-            strcat(val_list, list_str_call);
+            int n = snprintf(list_str_call, sizeof(list_str_call), "py_list_repr(%s, len_%s)", t, t);
+            if (n < 0 || (size_t)n >= sizeof(list_str_call) ||
+                !append_fragment(val_list, &val_pos, sizeof(val_list), list_str_call)) return;
             first = 0;
             continue;
         }
@@ -850,28 +869,35 @@ static void transpile_print(const char *args_str) {
         int is_str = is_string_expression(t);
         int is_flt = is_float_expression(t);
 
-        if (is_str) strcat(fmt_str, "%s");
-        else if (is_flt) strcat(fmt_str, "%f");
-        else strcat(fmt_str, "%lld");
+        if (is_str) {
+            if (!append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), "%s")) return;
+        } else if (is_flt) {
+            if (!append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), "%f")) return;
+        } else {
+            if (!append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), "%lld")) return;
+        }
 
-        if (!first && strlen(val_list) > 0) strcat(val_list, ", ");
+        if (!first && strlen(val_list) > 0 &&
+            !append_fragment(val_list, &val_pos, sizeof(val_list), ", ")) return;
 
         if (is_str) {
-            strcat(val_list, t);
+            if (!append_fragment(val_list, &val_pos, sizeof(val_list), t)) return;
         } else if (is_flt) {
             char cast_val[1050];
-            snprintf(cast_val, sizeof(cast_val), "(double)(%s)", t);
-            strcat(val_list, cast_val);
+            int n = snprintf(cast_val, sizeof(cast_val), "(double)(%s)", t);
+            if (n < 0 || (size_t)n >= sizeof(cast_val) ||
+                !append_fragment(val_list, &val_pos, sizeof(val_list), cast_val)) return;
         } else {
             char cast_val[1050];
-            snprintf(cast_val, sizeof(cast_val), "(long long)(%s)", t);
-            strcat(val_list, cast_val);
+            int n = snprintf(cast_val, sizeof(cast_val), "(long long)(%s)", t);
+            if (n < 0 || (size_t)n >= sizeof(cast_val) ||
+                !append_fragment(val_list, &val_pos, sizeof(val_list), cast_val)) return;
         }
         first = 0;
     }
 
-    if (strlen(val_list) > 0) emit("    printf(\"%s\\n\", %s);\n", fmt_str, val_list);
-    else emit("    printf(\"%s\\n\");\n", fmt_str);
+    if (strlen(val_list) > 0) emit("    printf("%s\\\\n", %s);\\n", fmt_str, val_list);
+    else emit("    printf("%s\\\\n");\\n", fmt_str);
 }
 
 static void handle_dedent(int new_indent, int is_else_or_elif) {
