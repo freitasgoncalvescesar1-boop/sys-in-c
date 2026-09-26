@@ -441,7 +441,7 @@ static void replace_operators(char *expr) {
             tmp[t] = '\0';
         }
     }
-    strcpy(expr, tmp);
+    snprintf(expr, 4096, "%s", tmp);
 }
 
 static int append_expr_text(char *out, size_t *pos, size_t cap, const char *text) {
@@ -659,9 +659,7 @@ static void transform_advanced_expressions(char *expr) {
                         if (* (colon2 + 1)) snprintf(s_step, sizeof(s_step), "%s", colon2 + 1);
                     } else if (colon1) {
                         *colon1 = '\0';
-                        if (strlen(slice_content) > 0) strcpy(s_start, slice_content);
-                        if (strlen(colon1 + 1) > 0) strcpy(s_end, colon1 + 1);
-                    }
+                                            }
                     char slice_call[512];
                     snprintf(slice_call, sizeof(slice_call), "py_str_slice(%s, %s, %s, %s)", ident, s_start, s_end, s_step);
                     if (!append_expr_text(out, &o, sizeof(out), slice_call)) return;
@@ -1301,8 +1299,10 @@ static void transpile_line(char *line, int indent) {
             int fst = 1;
             while (p_tok) {
                 while (*p_tok == ' ') p_tok++;
-                if (!fst) strcat(fn_decl, ", ");
-                strcat(fn_decl, "int64_t "); strcat(fn_decl, p_tok);
+                size_t fn_pos = strlen(fn_decl);
+                if (!fst && !append_fragment(fn_decl, &fn_pos, sizeof(fn_decl), ", ")) return;
+                if (!append_fragment(fn_decl, &fn_pos, sizeof(fn_decl), "int64_t ")) return;
+                if (!append_fragment(fn_decl, &fn_pos, sizeof(fn_decl), p_tok)) return;
                 fst = 0;
                 p_tok = strtok(NULL, ",");
             }
@@ -1654,8 +1654,17 @@ int main(int argc, char *argv[]) {
                 utilipc_close();
                 return 1;
             }
-            if (accum[0] != '\0') strcat(accum, " ");
-            strcat(accum, trimmed);
+            size_t accum_pos = strlen(accum);
+            if (accum[0] != '\0' && !append_fragment(accum, &accum_pos, sizeof(accum), " ")) {
+                fclose(fp);
+                utilipc_close();
+                return 1;
+            }
+            if (!append_fragment(accum, &accum_pos, sizeof(accum), trimmed)) {
+                fclose(fp);
+                utilipc_close();
+                return 1;
+            }
 
             if (open_braces == 0 && open_brackets == 0 && open_parens == 0) {
                 transpile_line(accum, accum_indent);
