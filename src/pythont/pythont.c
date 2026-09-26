@@ -1758,7 +1758,9 @@ int main(int argc, char *argv[]) {
         "    for (int i = 0; i < len; i++) {\n"
         "        char elem[32];\n"
         "        snprintf(elem, sizeof(elem), \"%%lld%%s\", (long long)arr[i], (i < len - 1) ? \", \" : \"\");\n"
-        "        strcat(list_buf, elem);\n"
+        "        size_t list_len = strlen(list_buf), elem_len = strlen(elem);\n"
+        "        if (list_len + elem_len + 1 >= sizeof(list_buf)) return "[list too large]";\n"
+        "        memcpy(list_buf + list_len, elem, elem_len + 1);\n"
         "    }\n"
         "    strcat(list_buf, \"]\");\n"
         "    return list_buf;\n"
@@ -1926,9 +1928,9 @@ int main(int argc, char *argv[]) {
         "    for (int i = 0; i < d->count; i++) {\n"
         "        if (d->entries[i].used) {\n"
         "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"'%%s'%%s\", d->entries[i].key, (i < d->count - 1) ? \", \" : \"\");\n"
-        "            size_t k_len = strlen(k_buf), tmp_len = strlen(tmp);
-            if (k_len + tmp_len + 1 >= sizeof(k_buf)) return "[dict keys too large]";
-            memcpy(k_buf + k_len, tmp, tmp_len + 1);\n"
+        "            size_t k_len = strlen(k_buf), tmp_len = strlen(tmp);\n"
+        "            if (k_len + tmp_len + 1 >= sizeof(k_buf)) return "[dict keys too large]";\n"
+        "            memcpy(k_buf + k_len, tmp, tmp_len + 1);\n"
         "        }\n"
         "    }\n"
         "    strcat(k_buf, \"]\"); return k_buf;\n"
@@ -1938,9 +1940,9 @@ int main(int argc, char *argv[]) {
         "    for (int i = 0; i < d->count; i++) {\n"
         "        if (d->entries[i].used) {\n"
         "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"%%s%%s\", d->entries[i].val, (i < d->count - 1) ? \", \" : \"\");\n"
-        "            size_t v_len = strlen(v_buf), tmp_len = strlen(tmp);
-            if (v_len + tmp_len + 1 >= sizeof(v_buf)) return "[dict values too large]";
-            memcpy(v_buf + v_len, tmp, tmp_len + 1);\n"
+        "            size_t v_len = strlen(v_buf), tmp_len = strlen(tmp);\n"
+        "            if (v_len + tmp_len + 1 >= sizeof(v_buf)) return "[dict values too large]";\n"
+        "            memcpy(v_buf + v_len, tmp, tmp_len + 1);\n"
         "        }\n"
         "    }\n"
         "    strcat(v_buf, \"]\"); return v_buf;\n"
