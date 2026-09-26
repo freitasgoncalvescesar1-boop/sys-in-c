@@ -353,6 +353,18 @@ static void replace_operators(char *expr) {
     strcpy(expr, tmp);
 }
 
+static int append_expr_text(char *out, size_t *pos, size_t cap, const char *text) {
+    size_t n = strlen(text);
+    if (*pos + n >= cap) {
+        fprintf(stderr, "pythont: generated expression is too large\n");
+        return 0;
+    }
+    memcpy(out + *pos, text, n);
+    *pos += n;
+    out[*pos] = '\0';
+    return 1;
+}
+
 static void transform_advanced_expressions(char *expr) {
     char out[4096] = "";
     size_t o = 0;
@@ -372,27 +384,27 @@ static void transform_advanced_expressions(char *expr) {
             if (expr[i] == '.' && (strncmp(expr + i, ".upper()", 8) == 0)) {
                 i += 8;
                 char call[256]; snprintf(call, sizeof(call), "py_str_upper(%s)", ident);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".lower()", 8) == 0)) {
                 i += 8;
                 char call[256]; snprintf(call, sizeof(call), "py_str_lower(%s)", ident);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".strip()", 8) == 0)) {
                 i += 8;
                 char call[256]; snprintf(call, sizeof(call), "py_str_strip(%s)", ident);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".title()", 8) == 0)) {
                 i += 8;
                 char call[256]; snprintf(call, sizeof(call), "py_str_title(%s)", ident);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".capitalize()", 13) == 0)) {
                 i += 13;
                 char call[256]; snprintf(call, sizeof(call), "py_str_capitalize(%s)", ident);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".startswith(", 12) == 0)) {
                 i += 12;
@@ -403,7 +415,7 @@ static void transform_advanced_expressions(char *expr) {
                 normalize_quotes_in_str(p_arg);
                 char call[256];
                 snprintf(call, sizeof(call), "py_str_startswith(%s, %s)", ident, p_arg);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".endswith(", 10) == 0)) {
                 i += 10;
@@ -414,7 +426,7 @@ static void transform_advanced_expressions(char *expr) {
                 normalize_quotes_in_str(p_arg);
                 char call[256];
                 snprintf(call, sizeof(call), "py_str_endswith(%s, %s)", ident, p_arg);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".count(", 7) == 0)) {
                 i += 7;
@@ -429,7 +441,7 @@ static void transform_advanced_expressions(char *expr) {
                 } else {
                     snprintf(call, sizeof(call), "py_str_count(%s, %s)", ident, p_arg);
                 }
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
             if (expr[i] == '.' && (strncmp(expr + i, ".replace(", 9) == 0)) {
                 i += 9;
@@ -440,7 +452,7 @@ static void transform_advanced_expressions(char *expr) {
                 normalize_quotes_in_str(r_args);
                 char call[512];
                 snprintf(call, sizeof(call), "py_str_replace(%s, %s)", ident, r_args);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
 
             // Métodos de Dict
@@ -448,12 +460,12 @@ static void transform_advanced_expressions(char *expr) {
                 if (strncmp(expr + i, ".keys()", 7) == 0) {
                     i += 7;
                     char call[256]; snprintf(call, sizeof(call), "py_dict_keys(&%s)", ident);
-                    strcat(out + o, call); o += strlen(call); continue;
+                    if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
                 }
                 if (strncmp(expr + i, ".values()", 9) == 0) {
                     i += 9;
                     char call[256]; snprintf(call, sizeof(call), "py_dict_values(&%s)", ident);
-                    strcat(out + o, call); o += strlen(call); continue;
+                    if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
                 }
                 if (strncmp(expr + i, ".get(", 5) == 0) {
                     i += 5;
@@ -468,7 +480,7 @@ static void transform_advanced_expressions(char *expr) {
                     char call[512];
                     if (d_arg) snprintf(call, sizeof(call), "py_dict_get_default(&%s, %s, %s)", ident, k_arg, d_arg);
                     else snprintf(call, sizeof(call), "py_dict_get_val(&%s, %s)", ident, k_arg);
-                    strcat(out + o, call); o += strlen(call); continue;
+                    if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
                 }
             }
 
@@ -492,12 +504,12 @@ static void transform_advanced_expressions(char *expr) {
                     char m_call[1024];
                     if (strlen(args_str) > 0) snprintf(m_call, sizeof(m_call), "%s_%s(&%s, %s)", sym->class_type, method_name, ident, args_str);
                     else snprintf(m_call, sizeof(m_call), "%s_%s(&%s)", sym->class_type, method_name, ident);
-                    strcat(out + o, m_call); o += strlen(m_call);
+                    if (!append_expr_text(out, &o, sizeof(out), m_call)) return;
                     i--; continue;
                 } else {
                     char f_access[128];
                     snprintf(f_access, sizeof(f_access), "%s.%s", ident, method_name);
-                    strcat(out + o, f_access); o += strlen(f_access);
+                    if (!append_expr_text(out, &o, sizeof(out), f_access)) return;
                     i--; continue;
                 }
             }
@@ -505,7 +517,7 @@ static void transform_advanced_expressions(char *expr) {
             if (sym && sym->type == VAR_FILE && strncmp(expr + i, ".read()", 7) == 0) {
                 i += 7;
                 char call[256]; snprintf(call, sizeof(call), "py_file_read(&%s)", ident);
-                strcat(out + o, call); o += strlen(call); continue;
+                if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
 
             if (sym && sym->type == VAR_DICT && expr[i] == '[') {
@@ -517,7 +529,7 @@ static void transform_advanced_expressions(char *expr) {
                 normalize_quotes_in_str(key_str);
                 char dict_call[512];
                 snprintf(dict_call, sizeof(dict_call), "py_dict_get_val(&%s, %s)", ident, key_str);
-                strcat(out + o, dict_call); o += strlen(dict_call);
+                if (!append_expr_text(out, &o, sizeof(out), dict_call)) return;
                 i--; continue;
             }
 
@@ -548,14 +560,23 @@ static void transform_advanced_expressions(char *expr) {
                     }
                     char slice_call[512];
                     snprintf(slice_call, sizeof(slice_call), "py_str_slice(%s, %s, %s, %s)", ident, s_start, s_end, s_step);
-                    strcat(out + o, slice_call); o += strlen(slice_call); continue;
+                    if (!append_expr_text(out, &o, sizeof(out), slice_call)) return; continue;
                 }
             }
 
-            for (size_t k = 0; k < id_len; k++) out[o++] = ident[k];
+            if (o + id_len >= sizeof(out)) {
+                fprintf(stderr, "pythont: generated expression is too large\n");
+                return;
+            }
+            memcpy(out + o, ident, id_len);
+            o += id_len;
             i--;
         } else {
-            out[o++] = expr[i];
+            if (o + 1 >= sizeof(out)) {
+            fprintf(stderr, "pythont: generated expression is too large\n");
+            return;
+        }
+        out[o++] = expr[i];
         }
     }
     out[o] = '\0';
