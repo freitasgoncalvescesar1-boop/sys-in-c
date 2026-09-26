@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <errno.h>
+#include <sys/wait.h>
 #include "../libutilipc/utilipc.h"
 
 #define MAX_CODE_SZ   (1024 * 1024)
@@ -1788,7 +1789,7 @@ int main(int argc, char *argv[]) {
         "        char elem[32];\n"
         "        snprintf(elem, sizeof(elem), \"%%lld%%s\", (long long)arr[i], (i < len - 1) ? \", \" : \"\");\n"
         "        size_t list_len = strlen(list_buf), elem_len = strlen(elem);\n"
-        "        if (list_len + elem_len + 1 >= sizeof(list_buf)) return \\"[list too large]\\\";\n"
+        "        if (list_len + elem_len + 1 >= sizeof(list_buf)) return \"[list too large]\";\n"
         "        memcpy(list_buf + list_len, elem, elem_len + 1);\n"
         "    }\n"
         "    strcat(list_buf, \"]\");\n"
