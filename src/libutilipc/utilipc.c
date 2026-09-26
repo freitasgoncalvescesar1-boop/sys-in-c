@@ -204,8 +204,10 @@ int utilipc_read_status(utilipc_data_t *out_data) {
     if (!out_data) return -1;
 
     lock_shm();
-    memcpy(out_data, &shm_ptr->data, sizeof(utilipc_data_t));
+    utilipc_data_t snapshot = shm_ptr->data;
     unlock_shm();
+
+    memcpy(out_data, &snapshot, sizeof(snapshot));
 
     return 0;
 }
