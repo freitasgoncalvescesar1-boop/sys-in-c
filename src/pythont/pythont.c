@@ -896,8 +896,8 @@ static void transpile_print(const char *args_str) {
         first = 0;
     }
 
-    if (strlen(val_list) > 0) emit("    printf("%s\\\\n", %s);\\n", fmt_str, val_list);
-    else emit("    printf("%s\\\\n");\\n", fmt_str);
+    if (strlen(val_list) > 0) emit("    printf(\\\"%s\\\\n\\\", %s);\\n", fmt_str, val_list);
+    else emit("    printf(\\\"%s\\\\n\\\");\\n", fmt_str);
 }
 
 static void handle_dedent(int new_indent, int is_else_or_elif) {
