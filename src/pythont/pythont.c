@@ -1805,8 +1805,13 @@ static void transpile_line(char *line, int indent) {
         if (strncmp(vstart, "self.", 5) == 0) {
             char *field = vstart + 5;
             replace_operators(vexpr_start); transform_advanced_expressions(vexpr_start);
-            if (inside_function && strlen(active_class) > 0) emit("    self.%s = %s;\n", field, vexpr_start);
-            else emit("    self->%s = %s;\n", field, vexpr_start);
+            int in_init_block = block_top > 0 && block_type[block_top - 1] == BLOCK_INIT;
+            if (inside_function && strlen(active_class) > 0 && in_init_block)
+                emit("    self.%s = %s;\n", field, vexpr_start);
+            else if (inside_function && strlen(active_class) > 0)
+                emit("    self->%s = %s;\n", field, vexpr_start);
+            else
+                emit("    self->%s = %s;\n", field, vexpr_start);
             return;
         }
 
@@ -2169,14 +2174,25 @@ int main(int argc, char *argv[]) {
         "#define py_min(a, b) (((a) < (b)) ? (a) : (b))\n"
         "#define py_max(a, b) (((a) > (b)) ? (a) : (b))\n"
         "#define py_abs(a)    llabs((int64_t)(a))\n"
-        "__attribute__((unused)) static inline int64_t py_int(const char *s) { return (int64_t)strtoll(s, NULL, 10); }\n"
-        "__attribute__((unused)) static inline double py_float(const char *s) { return strtod(s, NULL); }\n"
+        "__attribute__((unused)) static inline int64_t py_int_str(const char *s) { return (int64_t)strtoll(s, NULL, 10); }\n"
+        "__attribute__((unused)) static inline int64_t py_int_num(double d) { return (int64_t)d; }\n"
+        "#define py_int(x) _Generic((x), char*: py_int_str, const char*: py_int_str, default: py_int_num)(x)\n"
+        "__attribute__((unused)) static inline double py_float_str(const char *s) { return strtod(s, NULL); }\n"
+        "__attribute__((unused)) static inline double py_float_num(double d) { return d; }\n"
+        "#define py_float(x) _Generic((x), char*: py_float_str, const char*: py_float_str, default: py_float_num)(x)\n"
         "__attribute__((unused)) static inline int64_t py_round(double d) { return (int64_t)round(d); }\n"
-        "__attribute__((unused)) static inline const char *py_str(int64_t val) {\n"
+        "__attribute__((unused)) static inline const char *py_str_i64(int64_t val) {\n"
         "    static char s_buf[64];\n"
         "    snprintf(s_buf, sizeof(s_buf), \"%%lld\", (long long)val);\n"
         "    return s_buf;\n"
         "}\n"
+        "__attribute__((unused)) static inline const char *py_str_double(double val) {\n"
+        "    static char s_buf[64];\n"
+        "    snprintf(s_buf, sizeof(s_buf), \"%%g\", val);\n"
+        "    return s_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_text(const char *val) { return val ? val : \"None\"; }\n"
+        "#define py_str(x) _Generic((x), char*: py_str_text, const char*: py_str_text, float: py_str_double, double: py_str_double, default: py_str_i64)(x)\n"
         "__attribute__((unused)) static inline const char *py_bin(int64_t val) {\n"
         "    static char b_buf[70];\n"
         "    b_buf[0] = '0'; b_buf[1] = 'b'; int pos = 2;\n"
