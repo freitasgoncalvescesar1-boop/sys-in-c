@@ -186,6 +186,19 @@ static void emit_class_struct(const char *fmt, ...) {
     }
 }
 
+static int format_checked(char *out, size_t cap, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(out, cap, fmt, args);
+    va_end(args);
+
+    if (n < 0 || (size_t)n >= cap) {
+        fprintf(stderr, "pythont: generated C code is too large\n");
+        return 0;
+    }
+    return 1;
+}
+
 static void emit(const char *fmt, ...) {
     char buf[2048];
     va_list args;
@@ -294,7 +307,7 @@ static void replace_operators(char *expr) {
             while (expr[k] && expr[k] != ')' && p < sizeof(target) - 1) target[p++] = expr[k++];
             target[p] = '\0';
             if (expr[k] == ')') {
-                char sum_call[128];
+                char sum_call[256];
                 snprintf(sum_call, sizeof(sum_call), "py_sum(%s, len_%s)", target, target);
                 strcat(tmp + t, sum_call);
                 t += strlen(sum_call);
@@ -413,7 +426,7 @@ static void transform_advanced_expressions(char *expr) {
                 p_arg[p_l] = '\0';
                 if (expr[i] == ')') i++;
                 normalize_quotes_in_str(p_arg);
-                char call[256];
+                char call[512];
                 snprintf(call, sizeof(call), "py_str_startswith(%s, %s)", ident, p_arg);
                 if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
@@ -424,7 +437,7 @@ static void transform_advanced_expressions(char *expr) {
                 p_arg[p_l] = '\0';
                 if (expr[i] == ')') i++;
                 normalize_quotes_in_str(p_arg);
-                char call[256];
+                char call[512];
                 snprintf(call, sizeof(call), "py_str_endswith(%s, %s)", ident, p_arg);
                 if (!append_expr_text(out, &o, sizeof(out), call)) return; continue;
             }
@@ -435,7 +448,7 @@ static void transform_advanced_expressions(char *expr) {
                 p_arg[p_l] = '\0';
                 if (expr[i] == ')') i++;
                 normalize_quotes_in_str(p_arg);
-                char call[256];
+                char call[512];
                 if (sym && sym->type == VAR_LIST) {
                     snprintf(call, sizeof(call), "py_list_count(%s, len_%s, %s)", ident, ident, p_arg);
                 } else {
@@ -625,7 +638,7 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
             if (sym && sym->type == VAR_LIST) {
                 strcat(fmt_buf, "%s");
                 if (arg_cnt > 0) strcat(args_buf, ", ");
-                char list_call[128];
+                char list_call[1100];
                 snprintf(list_call, sizeof(list_call), "py_list_repr(%s, len_%s)", trim_e, trim_e);
                 strcat(args_buf, list_call);
                 arg_cnt++;
@@ -644,11 +657,11 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
             if (is_str) {
                 strcat(args_buf, trim_e);
             } else if (is_flt) {
-                char cast_arg[512];
+                char cast_arg[544];
                 snprintf(cast_arg, sizeof(cast_arg), "(double)(%s)", trim_e);
                 strcat(args_buf, cast_arg);
             } else {
-                char cast_arg[512];
+                char cast_arg[544];
                 snprintf(cast_arg, sizeof(cast_arg), "(long long)(%s)", trim_e);
                 strcat(args_buf, cast_arg);
             }
@@ -731,7 +744,7 @@ static void transpile_print(const char *args_str) {
         if (sym && sym->type == VAR_LIST) {
             strcat(fmt_str, "%s");
             if (!first && strlen(val_list) > 0) strcat(val_list, ", ");
-            char list_str_call[128];
+            char list_str_call[2100];
             snprintf(list_str_call, sizeof(list_str_call), "py_list_repr(%s, len_%s)", t, t);
             strcat(val_list, list_str_call);
             first = 0;
@@ -750,11 +763,11 @@ static void transpile_print(const char *args_str) {
         if (is_str) {
             strcat(val_list, t);
         } else if (is_flt) {
-            char cast_val[512];
+            char cast_val[1050];
             snprintf(cast_val, sizeof(cast_val), "(double)(%s)", t);
             strcat(val_list, cast_val);
         } else {
-            char cast_val[512];
+            char cast_val[1050];
             snprintf(cast_val, sizeof(cast_val), "(long long)(%s)", t);
             strcat(val_list, cast_val);
         }
@@ -1240,8 +1253,10 @@ static void transpile_line(char *line, int indent) {
             char *v1 = strtok(vstart, ","); char *v2 = strtok(NULL, ",");
             char *e1 = strtok(vexpr_start, ","); char *e2 = strtok(NULL, ",");
             if (v1 && v2 && e1 && e2) {
-                while (*v1 == ' ') v1++; while (*v2 == ' ') v2++;
-                while (*e1 == ' ') e1++; while (*e2 == ' ') e2++;
+                while (*v1 == ' ') v1++;
+                while (*v2 == ' ') v2++;
+                while (*e1 == ' ') e1++;
+                while (*e2 == ' ') e2++;
                 register_var(v1, VAR_INT, NULL); register_var(v2, VAR_INT, NULL);
                 emit("    %s = %s;\n    %s = %s;\n", v1, e1, v2, e2);
                 return;
@@ -1307,7 +1322,10 @@ static void transpile_line(char *line, int indent) {
             register_var(vstart, VAR_DICT, NULL);
             emit("    py_dict_init(&%s);\n", vstart);
             char inner_dict[2048];
-            snprintf(inner_dict, sizeof(inner_dict), "%.*s", (int)(elen - 2), vexpr_start + 1);
+            size_t inner_len = elen - 2;
+            if (inner_len >= sizeof(inner_dict)) inner_len = sizeof(inner_dict) - 1;
+            memcpy(inner_dict, vexpr_start + 1, inner_len);
+            inner_dict[inner_len] = '\0';
 
             char *pair = inner_dict;
             while (*pair) {
@@ -1343,7 +1361,10 @@ static void transpile_line(char *line, int indent) {
             register_var(vstart, VAR_LIST, NULL);
             if (elen > 2) {
                 char items_only[2048];
-                snprintf(items_only, sizeof(items_only), "%.*s", (int)(elen - 2), vexpr_start + 1);
+                size_t items_len = elen - 2;
+                if (items_len >= sizeof(items_only)) items_len = sizeof(items_only) - 1;
+                memcpy(items_only, vexpr_start + 1, items_len);
+                items_only[items_len] = '\0';
                 int elem_count = 1;
                 for (size_t c = 0; items_only[c]; c++) if (items_only[c] == ',') elem_count++;
                 emit("    { static const int64_t _init[] = {%s}; memcpy(%s, _init, sizeof(_init)); len_%s = %d; }\n",
@@ -1511,7 +1532,7 @@ int main(int argc, char *argv[]) {
     }
 
     char final_c_code[MAX_CODE_SZ];
-    snprintf(final_c_code, sizeof(final_c_code),
+    if (!format_checked(final_c_code, sizeof(final_c_code),
         "/* ========================================================\n"
         "   Codigo C Nativo Gerado Automaticamente pelo pythont 1.0-release\n"
         "   ======================================================== */\n"
@@ -1754,7 +1775,10 @@ int main(int argc, char *argv[]) {
         "%s\n"
         "    return 0;\n"
         "}\n",
-        class_struct_buffer, func_buffer, var_decl_buf, main_buffer);
+        class_struct_buffer, func_buffer, var_decl_buf, main_buffer)) {
+        utilipc_close();
+        return 1;
+    }
 
     if (emit_c_only) {
         printf("%s\n", final_c_code);
@@ -1789,7 +1813,7 @@ int main(int argc, char *argv[]) {
         run_after = 1;
     }
 
-    char compile_cmd[1024];
+    char compile_cmd[2048];
     snprintf(compile_cmd, sizeof(compile_cmd), "gcc -Wno-unused-function -Wno-unused-variable -O2 %s -o %s -lm", tmp_c_path, bin_path);
 
     int comp_res = system(compile_cmd);
