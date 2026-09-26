@@ -654,9 +654,9 @@ static void transform_advanced_expressions(char *expr) {
                     char s_start[32] = "0", s_end[32] = "999999", s_step[32] = "1";
                     if (colon2) {
                         *colon1 = '\0'; *colon2 = '\0';
-                        if (strlen(slice_content) > 0) strcpy(s_start, slice_content);
-                        if (strlen(colon1 + 1) > 0) strcpy(s_end, colon1 + 1);
-                        if (strlen(colon2 + 1) > 0) strcpy(s_step, colon2 + 1);
+                        if (*slice_content) snprintf(s_start, sizeof(s_start), "%s", slice_content);
+                        if (* (colon1 + 1)) snprintf(s_end, sizeof(s_end), "%s", colon1 + 1);
+                        if (* (colon2 + 1)) snprintf(s_step, sizeof(s_step), "%s", colon2 + 1);
                     } else if (colon1) {
                         *colon1 = '\0';
                         if (strlen(slice_content) > 0) strcpy(s_start, slice_content);
@@ -714,7 +714,11 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
                 raw_expr[eidx++] = *p++;
             }
             raw_expr[eidx] = '\0';
-            if (*p == '}') p++;
+            if (*p != '}') {
+                fprintf(stderr, "pythont: f-string expression is too large or unterminated\n");
+                return;
+            }
+            p++;
 
             char clean_expr[512];
             strncpy(clean_expr, raw_expr, sizeof(clean_expr) - 1);
