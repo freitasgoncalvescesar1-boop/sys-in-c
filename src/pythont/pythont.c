@@ -486,7 +486,11 @@ static ast_node_t *ast_parse_primary(ast_parser_t *parser) {
         return ast_new(AST_STRING, token.text);
     }
 
-    if (token.type == TOK_IDENTIFIER || token.type == TOK_KEYWORD) {
+    if (token.type == TOK_IDENTIFIER ||
+        (token.type == TOK_KEYWORD &&
+         (strcmp(token.text, "True") == 0 ||
+          strcmp(token.text, "False") == 0 ||
+          strcmp(token.text, "None") == 0))) {
         ast_next(parser);
 
         if (ast_is_delimiter(parser, "(")) {
@@ -533,11 +537,12 @@ static ast_node_t *ast_parse_primary(ast_parser_t *parser) {
         return node;
     }
 
-    if (parser->current.type == TOK_OPERATOR &&
-        (!strcmp(parser->current.text, "+") ||
-         !strcmp(parser->current.text, "-") ||
-         !strcmp(parser->current.text, "not") ||
-         !strcmp(parser->current.text, "~"))) {
+    if ((parser->current.type == TOK_OPERATOR &&
+         (!strcmp(parser->current.text, "+") ||
+          !strcmp(parser->current.text, "-") ||
+          !strcmp(parser->current.text, "~"))) ||
+        (parser->current.type == TOK_KEYWORD &&
+         strcmp(parser->current.text, "not") == 0)) {
         char op[LEX_TOKEN_TEXT];
         snprintf(op, sizeof(op), "%s", parser->current.text);
         ast_next(parser);
