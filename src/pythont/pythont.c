@@ -58,6 +58,10 @@ typedef struct {
     size_t pos;
     size_t line;
     size_t column;
+    int at_line_start;
+    int pending_dedents;
+    int indent_stack[MAX_INDENTS];
+    int indent_top;
 } lexer_t;
 
 static int lexer_is_identifier_start(unsigned char c) {
@@ -88,6 +92,10 @@ static void lexer_init(lexer_t *lexer, const char *source) {
     lexer->pos = 0;
     lexer->line = 1;
     lexer->column = 1;
+    lexer->at_line_start = 1;
+    lexer->pending_dedents = 0;
+    lexer->indent_stack[0] = 0;
+    lexer->indent_top = 0;
 }
 
 static void lexer_advance(lexer_t *lexer) {
@@ -151,8 +159,68 @@ static token_t lexer_make_token(token_type_t type, const char *text,
 }
 
 static token_t lexer_next(lexer_t *lexer) {
-    while (lexer_peek(lexer, 0) == ' ' || lexer_peek(lexer, 0) == '\\t' ||
-           lexer_peek(lexer, 0) == '\\r') {
+    if (lexer->pending_dedents > 0) {
+        lexer->pending_dedents--;
+        return lexer_make_token(TOK_DEDENT, "", lexer->line, lexer->column);
+    }
+
+    if (lexer->at_line_start) {
+        int indent = 0;
+
+        while (lexer_peek(lexer, 0) == ' ' || lexer_peek(lexer, 0) == '\t') {
+            indent += (lexer_peek(lexer, 0) == '\t') ? 4 : 1;
+            lexer_advance(lexer);
+        }
+
+        char first = lexer_peek(lexer, 0);
+
+        if (first == '#') {
+            while (lexer_peek(lexer, 0) && lexer_peek(lexer, 0) != '\n')
+                lexer_advance(lexer);
+            return lexer_next(lexer);
+        }
+
+        if (first == '\n') {
+            size_t line = lexer->line;
+            size_t column = lexer->column;
+            lexer_advance(lexer);
+            return lexer_make_token(TOK_NEWLINE, "\\n", line, column);
+        }
+
+        int current = lexer->indent_stack[lexer->indent_top];
+
+        if (indent > current) {
+            if (lexer->indent_top + 1 >= MAX_INDENTS)
+                return lexer_make_token(TOK_EOF, "<indent-too-deep>", lexer->line, lexer->column);
+
+            lexer->indent_stack[++lexer->indent_top] = indent;
+            lexer->at_line_start = 0;
+            return lexer_make_token(TOK_INDENT, "", lexer->line, 1);
+        }
+
+        if (indent < current) {
+            while (lexer->indent_top > 0 &&
+                   indent < lexer->indent_stack[lexer->indent_top]) {
+                lexer->indent_top--;
+                lexer->pending_dedents++;
+            }
+
+            if (indent != lexer->indent_stack[lexer->indent_top]) {
+                return lexer_make_token(TOK_EOF, "<invalid-indent>", lexer->line, lexer->column);
+            }
+
+            if (lexer->pending_dedents > 0) {
+                lexer->at_line_start = 0;
+                lexer->pending_dedents--;
+                return lexer_make_token(TOK_DEDENT, "", lexer->line, 1);
+            }
+        }
+
+        lexer->at_line_start = 0;
+    }
+
+    while (lexer_peek(lexer, 0) == ' ' || lexer_peek(lexer, 0) == '\t' ||
+           lexer_peek(lexer, 0) == '\r') {
         lexer_advance(lexer);
     }
 
@@ -160,16 +228,23 @@ static token_t lexer_next(lexer_t *lexer) {
     size_t column = lexer->column;
     char c = lexer_peek(lexer, 0);
 
-    if (!c) return lexer_make_token(TOK_EOF, "", line, column);
+    if (!c) {
+        if (lexer->indent_top > 0) {
+            lexer->indent_top--;
+            return lexer_make_token(TOK_DEDENT, "", line, column);
+        }
+        return lexer_make_token(TOK_EOF, "", line, column);
+    }
 
     if (c == '#') {
-        while (lexer_peek(lexer, 0) && lexer_peek(lexer, 0) != '\\n')
+        while (lexer_peek(lexer, 0) && lexer_peek(lexer, 0) != '\n')
             lexer_advance(lexer);
         return lexer_next(lexer);
     }
 
-    if (c == '\\n') {
+    if (c == '\n') {
         lexer_advance(lexer);
+        lexer->at_line_start = 1;
         return lexer_make_token(TOK_NEWLINE, "\\n", line, column);
     }
 
@@ -182,7 +257,7 @@ static token_t lexer_next(lexer_t *lexer) {
             text[n++] = lexer_peek(lexer, 0);
             lexer_advance(lexer);
         }
-        text[n] = '\\0';
+        text[n] = '\0';
 
         return lexer_make_token(
             lexer_is_keyword(text) ? TOK_KEYWORD : TOK_IDENTIFIER,
@@ -235,17 +310,17 @@ static token_t lexer_next(lexer_t *lexer) {
             }
         }
 
-        text[n] = '\\0';
+        text[n] = '\0';
         return lexer_make_token(is_float ? TOK_FLOAT : TOK_INTEGER,
                                 text, line, column);
     }
 
-    if (c == '\\'' || c == '"') {
+    if (c == '\'' || c == '\"') {
         token_t token;
         token.type = TOK_STRING;
         token.line = line;
         token.column = column;
-        token.text[0] = '\\0';
+        token.text[0] = '\0';
 
         if (!lexer_read_quoted(lexer, &token, c))
             return lexer_make_token(TOK_STRING, "<unterminated>", line, column);
@@ -253,7 +328,7 @@ static token_t lexer_next(lexer_t *lexer) {
     }
 
     {
-        char text[3] = { c, '\\0', '\\0' };
+        char text[3] = { c, '\0', '\0' };
         char next = lexer_peek(lexer, 1);
 
         if ((c == '=' || c == '!' || c == '<' || c == '>') && next == '=') {
@@ -269,6 +344,21 @@ static token_t lexer_next(lexer_t *lexer) {
         token_type_t type =
             strchr("()[]{}:,.;", text[0]) ? TOK_DELIMITER : TOK_OPERATOR;
         return lexer_make_token(type, text, line, column);
+    }
+}
+
+static void lexer_dump(const char *source) {
+    lexer_t lexer;
+    lexer_init(&lexer, source);
+
+    for (;;) {
+        token_t token = lexer_next(&lexer);
+        printf("%zu:%zu  %-10s  %s\\n",
+               token.line, token.column,
+               token_type_name(token.type), token.text);
+
+        if (token.type == TOK_EOF)
+            break;
     }
 }
 
@@ -1884,12 +1974,62 @@ int main(int argc, char *argv[]) {
     const char *inline_code = NULL;
     const char *out_bin = NULL;
     int emit_c_only = 0;
+    int dump_tokens = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) inline_code = argv[++i];
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-c") == 0) emit_c_only = 1;
+        else if (strcmp(argv[i], "--tokens") == 0) dump_tokens = 1;
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) out_bin = argv[++i];
         else if (!py_file && !inline_code) py_file = argv[i];
+    }
+
+    if (dump_tokens) {
+        const char *source = inline_code;
+
+        if (!source && py_file) {
+            FILE *fp = fopen(py_file, "rb");
+            if (!fp) {
+                fprintf(stderr, "pythont: erro ao abrir '%s': %s\\n",
+                        py_file, strerror(errno));
+                utilipc_close();
+                return 1;
+            }
+
+            if (fseek(fp, 0, SEEK_END) != 0) {
+                fclose(fp);
+                utilipc_close();
+                return 1;
+            }
+
+            long size = ftell(fp);
+            if (size < 0 || (size_t)size >= MAX_CODE_SZ) {
+                fclose(fp);
+                fprintf(stderr, "pythont: arquivo grande demais para tokenizacao\\n");
+                utilipc_close();
+                return 1;
+            }
+
+            rewind(fp);
+            char *source_copy = malloc((size_t)size + 1);
+            if (!source_copy) {
+                fclose(fp);
+                fprintf(stderr, "pythont: memoria insuficiente para tokenizacao\\n");
+                utilipc_close();
+                return 1;
+            }
+
+            size_t read_size = fread(source_copy, 1, (size_t)size, fp);
+            fclose(fp);
+            source_copy[read_size] = '\\0';
+            lexer_dump(source_copy);
+            free(source_copy);
+        } else {
+            lexer_dump(source ? source : "");
+        }
+
+        utilipc_close();
+        return 0;
     }
 
     if (inline_code) {
