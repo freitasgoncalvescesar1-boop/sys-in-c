@@ -24,6 +24,272 @@
 #define COLOR_VAL     "\033[1;36m"
 #define COLOR_MUTED   "\033[0;90m"
 
+/*
+ * Simple lexer/tokenizer foundation.
+ *
+ * The current transpiler still uses its legacy line parser. This lexer is
+ * intentionally isolated so tokenization can be adopted incrementally.
+ */
+#define LEX_TOKEN_TEXT 128
+
+typedef enum {
+    TOK_EOF = 0,
+    TOK_IDENTIFIER,
+    TOK_INTEGER,
+    TOK_FLOAT,
+    TOK_STRING,
+    TOK_NEWLINE,
+    TOK_INDENT,
+    TOK_DEDENT,
+    TOK_OPERATOR,
+    TOK_DELIMITER,
+    TOK_KEYWORD
+} token_type_t;
+
+typedef struct {
+    token_type_t type;
+    char text[LEX_TOKEN_TEXT];
+    size_t line;
+    size_t column;
+} token_t;
+
+typedef struct {
+    const char *source;
+    size_t pos;
+    size_t line;
+    size_t column;
+} lexer_t;
+
+static int lexer_is_identifier_start(unsigned char c) {
+    return isalpha(c) || c == '_';
+}
+
+static int lexer_is_identifier_char(unsigned char c) {
+    return isalnum(c) || c == '_';
+}
+
+static int lexer_is_keyword(const char *text) {
+    static const char *const keywords[] = {
+        "and", "as", "assert", "break", "class", "continue",
+        "def", "elif", "else", "except", "False", "finally",
+        "for", "from", "if", "import", "in", "is", "lambda",
+        "None", "not", "or", "pass", "raise", "return",
+        "True", "try", "while", "with", "yield"
+    };
+
+    for (size_t i = 0; i < sizeof(keywords) / sizeof(keywords[0]); ++i) {
+        if (strcmp(text, keywords[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+static void lexer_init(lexer_t *lexer, const char *source) {
+    lexer->source = source ? source : "";
+    lexer->pos = 0;
+    lexer->line = 1;
+    lexer->column = 1;
+}
+
+static void lexer_advance(lexer_t *lexer) {
+    char c = lexer->source[lexer->pos];
+    if (!c) return;
+
+    lexer->pos++;
+    if (c == '\\n') {
+        lexer->line++;
+        lexer->column = 1;
+    } else {
+        lexer->column++;
+    }
+}
+
+static char lexer_peek(const lexer_t *lexer, size_t offset) {
+    return lexer->source[lexer->pos + offset];
+}
+
+static int lexer_read_quoted(lexer_t *lexer, token_t *token, char quote) {
+    size_t out = 0;
+
+    lexer_advance(lexer);
+
+    while (lexer_peek(lexer, 0) && lexer_peek(lexer, 0) != quote) {
+        char c = lexer_peek(lexer, 0);
+
+        if (c == '\\n') return 0;
+
+        if (c == '\\\\' && lexer_peek(lexer, 1)) {
+            if (out + 2 >= sizeof(token->text)) return 0;
+            token->text[out++] = c;
+            lexer_advance(lexer);
+            token->text[out++] = lexer_peek(lexer, 0);
+            lexer_advance(lexer);
+            continue;
+        }
+
+        if (out + 1 >= sizeof(token->text)) return 0;
+        token->text[out++] = c;
+        lexer_advance(lexer);
+    }
+
+    if (lexer_peek(lexer, 0) != quote) return 0;
+    lexer_advance(lexer);
+
+    token->text[out] = '\\0';
+    return 1;
+}
+
+static token_t lexer_make_token(token_type_t type, const char *text,
+                                size_t line, size_t column) {
+    token_t token;
+    token.type = type;
+    token.line = line;
+    token.column = column;
+
+    if (!text) text = "";
+    snprintf(token.text, sizeof(token.text), "%s", text);
+    return token;
+}
+
+static token_t lexer_next(lexer_t *lexer) {
+    while (lexer_peek(lexer, 0) == ' ' || lexer_peek(lexer, 0) == '\\t' ||
+           lexer_peek(lexer, 0) == '\\r') {
+        lexer_advance(lexer);
+    }
+
+    size_t line = lexer->line;
+    size_t column = lexer->column;
+    char c = lexer_peek(lexer, 0);
+
+    if (!c) return lexer_make_token(TOK_EOF, "", line, column);
+
+    if (c == '#') {
+        while (lexer_peek(lexer, 0) && lexer_peek(lexer, 0) != '\\n')
+            lexer_advance(lexer);
+        return lexer_next(lexer);
+    }
+
+    if (c == '\\n') {
+        lexer_advance(lexer);
+        return lexer_make_token(TOK_NEWLINE, "\\n", line, column);
+    }
+
+    if (lexer_is_identifier_start((unsigned char)c)) {
+        char text[LEX_TOKEN_TEXT];
+        size_t n = 0;
+
+        while (lexer_is_identifier_char((unsigned char)lexer_peek(lexer, 0))) {
+            if (n + 1 >= sizeof(text)) break;
+            text[n++] = lexer_peek(lexer, 0);
+            lexer_advance(lexer);
+        }
+        text[n] = '\\0';
+
+        return lexer_make_token(
+            lexer_is_keyword(text) ? TOK_KEYWORD : TOK_IDENTIFIER,
+            text, line, column);
+    }
+
+    if (isdigit((unsigned char)c) ||
+        (c == '.' && isdigit((unsigned char)lexer_peek(lexer, 1)))) {
+        char text[LEX_TOKEN_TEXT];
+        size_t n = 0;
+        int is_float = 0;
+
+        if (c == '.') is_float = 1;
+
+        while (isdigit((unsigned char)lexer_peek(lexer, 0))) {
+            if (n + 1 >= sizeof(text)) break;
+            text[n++] = lexer_peek(lexer, 0);
+            lexer_advance(lexer);
+        }
+
+        if (lexer_peek(lexer, 0) == '.' && !is_float) {
+            is_float = 1;
+            if (n + 1 < sizeof(text)) {
+                text[n++] = '.';
+                lexer_advance(lexer);
+            }
+            while (isdigit((unsigned char)lexer_peek(lexer, 0))) {
+                if (n + 1 >= sizeof(text)) break;
+                text[n++] = lexer_peek(lexer, 0);
+                lexer_advance(lexer);
+            }
+        }
+
+        if (lexer_peek(lexer, 0) == 'e' || lexer_peek(lexer, 0) == 'E') {
+            is_float = 1;
+            if (n + 1 < sizeof(text)) {
+                text[n++] = lexer_peek(lexer, 0);
+                lexer_advance(lexer);
+            }
+            if (lexer_peek(lexer, 0) == '+' || lexer_peek(lexer, 0) == '-') {
+                if (n + 1 < sizeof(text)) {
+                    text[n++] = lexer_peek(lexer, 0);
+                    lexer_advance(lexer);
+                }
+            }
+            while (isdigit((unsigned char)lexer_peek(lexer, 0))) {
+                if (n + 1 >= sizeof(text)) break;
+                text[n++] = lexer_peek(lexer, 0);
+                lexer_advance(lexer);
+            }
+        }
+
+        text[n] = '\\0';
+        return lexer_make_token(is_float ? TOK_FLOAT : TOK_INTEGER,
+                                text, line, column);
+    }
+
+    if (c == '\\'' || c == '"') {
+        token_t token;
+        token.type = TOK_STRING;
+        token.line = line;
+        token.column = column;
+        token.text[0] = '\\0';
+
+        if (!lexer_read_quoted(lexer, &token, c))
+            return lexer_make_token(TOK_STRING, "<unterminated>", line, column);
+        return token;
+    }
+
+    {
+        char text[3] = { c, '\\0', '\\0' };
+        char next = lexer_peek(lexer, 1);
+
+        if ((c == '=' || c == '!' || c == '<' || c == '>') && next == '=') {
+            text[1] = '=';
+        } else if ((c == '*' && next == '*') || (c == '/' && next == '/') ||
+                   (c == '-' && next == '>') || (c == '=' && next == '>')) {
+            text[1] = next;
+        }
+
+        lexer_advance(lexer);
+        if (text[1]) lexer_advance(lexer);
+
+        token_type_t type =
+            strchr("()[]{}:,.;", text[0]) ? TOK_DELIMITER : TOK_OPERATOR;
+        return lexer_make_token(type, text, line, column);
+    }
+}
+
+static const char *token_type_name(token_type_t type) {
+    switch (type) {
+        case TOK_EOF: return "EOF";
+        case TOK_IDENTIFIER: return "IDENTIFIER";
+        case TOK_INTEGER: return "INTEGER";
+        case TOK_FLOAT: return "FLOAT";
+        case TOK_STRING: return "STRING";
+        case TOK_NEWLINE: return "NEWLINE";
+        case TOK_INDENT: return "INDENT";
+        case TOK_DEDENT: return "DEDENT";
+        case TOK_OPERATOR: return "OPERATOR";
+        case TOK_DELIMITER: return "DELIMITER";
+        case TOK_KEYWORD: return "KEYWORD";
+        default: return "UNKNOWN";
+    }
+}
+
+
 typedef enum {
     VAR_INT = 0,
     VAR_FLOAT,
