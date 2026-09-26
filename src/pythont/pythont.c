@@ -342,43 +342,62 @@ static void replace_operators(char *expr) {
 
 
         if (strncmp(expr + i, " and ", 5) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), " && ")) return; i += 4;
+            if (!append_fragment(tmp, &t, sizeof(tmp), " && ")) return;
+            i += 4;
         } else if (strncmp(expr + i, " or ", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), " || ")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), " || ")) return;
+            i += 3;
         } else if (strncmp(expr + i, "not ", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "!")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "!")) return;
+            i += 3;
         } else if (strncmp(expr + i, "True", 4) == 0 && !isalnum((unsigned char)expr[i+4]) && expr[i+4] != '_') {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "1")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "1")) return;
+            i += 3;
         } else if (strncmp(expr + i, "False", 5) == 0 && !isalnum((unsigned char)expr[i+5]) && expr[i+5] != '_') {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "0")) return; i += 4;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "0")) return;
+            i += 4;
         } else if (strncmp(expr + i, "None", 4) == 0 && !isalnum((unsigned char)expr[i+4])) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "NULL")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "NULL")) return;
+            i += 3;
         } else if (strncmp(expr + i, "min(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_min(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_min(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "max(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_max(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_max(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "abs(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_abs(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_abs(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "int(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_int(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_int(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "str(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_str(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_str(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "float(", 6) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_float(")) return; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_float(")) return;
+            i += 5;
         } else if (strncmp(expr + i, "round(", 6) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_round(")) return; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_round(")) return;
+            i += 5;
         } else if (strncmp(expr + i, "bin(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_bin(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_bin(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "hex(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_hex(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_hex(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "oct(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_oct(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_oct(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "chr(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_chr(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_chr(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "ord(", 4) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_ord(")) return; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_ord(")) return;
+            i += 3;
         } else if (strncmp(expr + i, "input(", 6) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "py_input(")) return; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_input(")) return;
+            i += 5;
         } else if (strncmp(expr + i, "sum(", 4) == 0) {
             char target[64] = "";
             size_t k = i + 4, p = 0;
@@ -413,25 +432,35 @@ static void replace_operators(char *expr) {
                 i = k;
             }
         } else if (strncmp(expr + i, "math.sqrt(", 10) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "sqrt(")) return; i += 9;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "sqrt(")) return;
+            i += 9;
         } else if (strncmp(expr + i, "math.sin(", 9) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "sin(")) return; i += 8;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "sin(")) return;
+            i += 8;
         } else if (strncmp(expr + i, "math.cos(", 9) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "cos(")) return; i += 8;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "cos(")) return;
+            i += 8;
         } else if (strncmp(expr + i, "math.floor(", 11) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "floor(")) return; i += 10;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "floor(")) return;
+            i += 10;
         } else if (strncmp(expr + i, "math.ceil(", 10) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "ceil(")) return; i += 9;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "ceil(")) return;
+            i += 9;
         } else if (strncmp(expr + i, "math.pow(", 9) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "pow(")) return; i += 8;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "pow(")) return;
+            i += 8;
         } else if (strncmp(expr + i, "math.pi", 7) == 0 && !isalnum((unsigned char)expr[i+7]) && expr[i+7] != '_') {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "3.14159265358979323846")) return; i += 6;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "3.14159265358979323846")) return;
+            i += 6;
         } else if (strncmp(expr + i, "math.e", 6) == 0 && !isalnum((unsigned char)expr[i+6]) && expr[i+6] != '_') {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "2.71828182845904523536")) return; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "2.71828182845904523536")) return;
+            i += 5;
         } else if (strncmp(expr + i, "//", 2) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "/")) return; i += 1;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "/")) return;
+            i += 1;
         } else if (strncmp(expr + i, "self.", 5) == 0) {
-            if (!append_fragment(tmp, &t, sizeof(tmp), "self->")) return; i += 4;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "self->")) return;
+            i += 4;
         } else {
             if (t + 1 >= sizeof(tmp)) {
                 fprintf(stderr, "pythont: expression buffer exhausted\n");
@@ -1897,11 +1926,11 @@ int main(int argc, char *argv[]) {
         "__attribute__((unused)) static inline void py_dict_init(py_dict_t *d) { memset(d, 0, sizeof(py_dict_t)); }\n"
         "__attribute__((unused)) static inline void py_dict_set_str(py_dict_t *d, const char *k, const char *v) {\n"
         "    for (int i = 0; i < d->count; i++) {\n"
-        "        if (d->entries[i].used && strcmp(d->entries[i].key, k) == 0) { snprintf(d->entries[i].val, sizeof(d->entries[i].val), "%s", v); return; }\n"
+        "        if (d->entries[i].used && strcmp(d->entries[i].key, k) == 0) { snprintf(d->entries[i].val, sizeof(d->entries[i].val), \"%s\", v); return; }\n"
         "    }\n"
         "    if (d->count < 64) {\n"
-        "        snprintf(d->entries[d->count].key, sizeof(d->entries[d->count].key), "%s", k);
-        snprintf(d->entries[d->count].val, sizeof(d->entries[d->count].val), "%s", v);\n"
+        "        snprintf(d->entries[d->count].key, sizeof(d->entries[d->count].key), \"%s\", k);\n"
+        "        snprintf(d->entries[d->count].val, sizeof(d->entries[d->count].val), \"%s\", v);\n"
         "        d->entries[d->count].used = 1; d->count++;\n"
         "    }\n"
         "}\n"
@@ -1929,7 +1958,7 @@ int main(int argc, char *argv[]) {
         "        if (d->entries[i].used) {\n"
         "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"'%%s'%%s\", d->entries[i].key, (i < d->count - 1) ? \", \" : \"\");\n"
         "            size_t k_len = strlen(k_buf), tmp_len = strlen(tmp);\n"
-        "            if (k_len + tmp_len + 1 >= sizeof(k_buf)) return "[dict keys too large]";\n"
+        "            if (k_len + tmp_len + 1 >= sizeof(k_buf)) return \"[dict keys too large]\";\n"
         "            memcpy(k_buf + k_len, tmp, tmp_len + 1);\n"
         "        }\n"
         "    }\n"
@@ -1941,7 +1970,7 @@ int main(int argc, char *argv[]) {
         "        if (d->entries[i].used) {\n"
         "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"%%s%%s\", d->entries[i].val, (i < d->count - 1) ? \", \" : \"\");\n"
         "            size_t v_len = strlen(v_buf), tmp_len = strlen(tmp);\n"
-        "            if (v_len + tmp_len + 1 >= sizeof(v_buf)) return "[dict values too large]";\n"
+        "            if (v_len + tmp_len + 1 >= sizeof(v_buf)) return \"[dict values too large]\";\n"
         "            memcpy(v_buf + v_len, tmp, tmp_len + 1);\n"
         "        }\n"
         "    }\n"
