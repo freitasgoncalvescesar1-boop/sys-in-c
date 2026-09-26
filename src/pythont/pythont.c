@@ -669,6 +669,26 @@ static int run_process(const char *program, char *const argv[]) {
     return status;
 }
 
+static int append_format(char *out, size_t *pos, size_t cap, const char *fmt, ...) {
+    if (*pos >= cap) {
+        fprintf(stderr, "pythont: output buffer exhausted\n");
+        return 0;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(out + *pos, cap - *pos, fmt, args);
+    va_end(args);
+
+    if (n < 0 || (size_t)n >= cap - *pos) {
+        fprintf(stderr, "pythont: output buffer exhausted\n");
+        return 0;
+    }
+
+    *pos += (size_t)n;
+    return 1;
+}
+
 static int append_fragment(char *out, size_t *pos, size_t cap, const char *src) {
     size_t n = strlen(src);
     if (*pos > cap - 1 || n >= cap - *pos) {
@@ -2136,25 +2156,39 @@ int main(int argc, char *argv[]) {
 
     // Hoisting de variáveis
     char var_decl_buf[65536] = "";
+    size_t var_decl_pos = 0;
     for (int i = 0; i < symbol_count; i++) {
         if (!symbols[i].is_global) continue;
-        char dline[256];
-        if (symbols[i].type == VAR_INT) snprintf(dline, sizeof(dline), "    int64_t %s = 0;\n", symbols[i].name);
-        else if (symbols[i].type == VAR_FLOAT) snprintf(dline, sizeof(dline), "    double %s = 0.0;\n", symbols[i].name);
-        else if (symbols[i].type == VAR_STR) snprintf(dline, sizeof(dline), "    const char *%s = \"\";\n", symbols[i].name);
-        else if (symbols[i].type == VAR_LIST) snprintf(dline, sizeof(dline), "    int64_t %s[%d] = {0};\n    int64_t len_%s = 0;\n", symbols[i].name, MAX_LIST_SZ, symbols[i].name);
-        else if (symbols[i].type == VAR_DICT) snprintf(dline, sizeof(dline), "    py_dict_t %s; py_dict_init(&%s);\n", symbols[i].name, symbols[i].name);
-        else if (symbols[i].type == VAR_FILE) snprintf(dline, sizeof(dline), "    py_file_t %s = {0};\n", symbols[i].name);
-        else if (symbols[i].type == VAR_OBJ) snprintf(dline, sizeof(dline), "    %s %s = {0};\n", symbols[i].class_type, symbols[i].name);
-        else dline[0] = '\0';
-        size_t dlen = strlen(dline);
-        size_t decl_len = strlen(var_decl_buf);
-        if (decl_len > sizeof(var_decl_buf) - 1 || dlen >= sizeof(var_decl_buf) - decl_len) {
-            fprintf(stderr, "pythont: variable declaration buffer exhausted\n");
+
+        int ok = 1;
+        if (symbols[i].type == VAR_INT)
+            ok = append_format(var_decl_buf, &var_decl_pos, sizeof(var_decl_buf),
+                               "    int64_t %s = 0;\n", symbols[i].name);
+        else if (symbols[i].type == VAR_FLOAT)
+            ok = append_format(var_decl_buf, &var_decl_pos, sizeof(var_decl_buf),
+                               "    double %s = 0.0;\n", symbols[i].name);
+        else if (symbols[i].type == VAR_STR)
+            ok = append_format(var_decl_buf, &var_decl_pos, sizeof(var_decl_buf),
+                               "    const char *%s = \"\";\n", symbols[i].name);
+        else if (symbols[i].type == VAR_LIST)
+            ok = append_format(var_decl_buf, &var_decl_pos, sizeof(var_decl_buf),
+                               "    int64_t %s[%d] = {0};\n    int64_t len_%s = 0;\n",
+                               symbols[i].name, MAX_LIST_SZ, symbols[i].name);
+        else if (symbols[i].type == VAR_DICT)
+            ok = append_format(var_decl_buf, &var_decl_pos, sizeof(var_decl_buf),
+                               "    py_dict_t %s; py_dict_init(&%s);\n",
+                               symbols[i].name, symbols[i].name);
+        else if (symbols[i].type == VAR_FILE)
+            ok = append_format(var_decl_buf, &var_decl_pos, sizeof(var_decl_buf),
+                               "    py_file_t %s = {0};\n", symbols[i].name);
+        else if (symbols[i].type == VAR_OBJ)
+            ok = append_format(var_decl_buf, &var_decl_pos, sizeof(var_decl_buf),
+                               "    %s %s = {0};\n", symbols[i].class_type, symbols[i].name);
+
+        if (!ok) {
             utilipc_close();
             return 1;
         }
-        memcpy(var_decl_buf + decl_len, dline, dlen + 1);
     }
 
     char final_c_code[MAX_CODE_SZ];
