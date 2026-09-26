@@ -126,15 +126,31 @@ static symbol_t *find_symbol(const char *name) {
 static void register_var(const char *name, var_type_t type, const char *class_type) {
     symbol_t *sym = find_symbol(name);
     if (!sym && symbol_count < MAX_VARS) {
-        strncpy(symbols[symbol_count].name, name, 63);
+        size_t name_len = strlen(name);
+        if (name_len >= sizeof(symbols[symbol_count].name))
+            name_len = sizeof(symbols[symbol_count].name) - 1;
+        memcpy(symbols[symbol_count].name, name, name_len);
+        symbols[symbol_count].name[name_len] = '\0';
         symbols[symbol_count].type = type;
         symbols[symbol_count].is_global = !inside_function;
-        if (class_type) strncpy(symbols[symbol_count].class_type, class_type, 63);
+        if (class_type) {
+            size_t class_len = strlen(class_type);
+            if (class_len >= sizeof(symbols[symbol_count].class_type))
+                class_len = sizeof(symbols[symbol_count].class_type) - 1;
+            memcpy(symbols[symbol_count].class_type, class_type, class_len);
+            symbols[symbol_count].class_type[class_len] = '\0';
+        }
         else symbols[symbol_count].class_type[0] = '\0';
         symbol_count++;
     } else if (sym) {
         sym->type = type;
-        if (class_type) strncpy(sym->class_type, class_type, 63);
+        if (class_type) {
+            size_t class_len = strlen(class_type);
+            if (class_len >= sizeof(sym->class_type))
+                class_len = sizeof(sym->class_type) - 1;
+            memcpy(sym->class_type, class_type, class_len);
+            sym->class_type[class_len] = '\0';
+        }
     }
 }
 
@@ -1333,10 +1349,14 @@ static void transpile_line(char *line, int indent) {
             char *v1 = strtok(vstart, ","); char *v2 = strtok(NULL, ",");
             char *e1 = strtok(vexpr_start, ","); char *e2 = strtok(NULL, ",");
             if (v1 && v2 && e1 && e2) {
-                while (*v1 == ' ') v1++;
-                while (*v2 == ' ') v2++;
-                while (*e1 == ' ') e1++;
-                while (*e2 == ' ') e2++;
+                while (*v1 == ' ')
+                    v1++;
+                while (*v2 == ' ')
+                    v2++;
+                while (*e1 == ' ')
+                    e1++;
+                while (*e2 == ' ')
+                    e2++;
                 register_var(v1, VAR_INT, NULL); register_var(v2, VAR_INT, NULL);
                 emit("    %s = %s;\n    %s = %s;\n", v1, e1, v2, e2);
                 return;
