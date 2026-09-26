@@ -43,7 +43,8 @@ typedef enum {
     TOK_DEDENT,
     TOK_OPERATOR,
     TOK_DELIMITER,
-    TOK_KEYWORD
+    TOK_KEYWORD,
+    TOK_ERROR
 } token_type_t;
 
 typedef struct {
@@ -100,18 +101,25 @@ static void lexer_init(lexer_t *lexer, const char *source) {
 
 static void lexer_advance(lexer_t *lexer) {
     char c = lexer->source[lexer->pos];
-    if (!c) return;
+
+    if (!c)
+        return;
 
     lexer->pos++;
-    if (c == '\\n') {
+
+    if (c == '\n') {
         lexer->line++;
         lexer->column = 1;
+        lexer->at_line_start = 1;
     } else {
         lexer->column++;
     }
 }
 
 static char lexer_peek(const lexer_t *lexer, size_t offset) {
+    if (!lexer->source)
+        return '\0';
+
     return lexer->source[lexer->pos + offset];
 }
 
@@ -123,9 +131,9 @@ static int lexer_read_quoted(lexer_t *lexer, token_t *token, char quote) {
     while (lexer_peek(lexer, 0) && lexer_peek(lexer, 0) != quote) {
         char c = lexer_peek(lexer, 0);
 
-        if (c == '\\n') return 0;
+        if (c == '\n') return 0;
 
-        if (c == '\\\\' && lexer_peek(lexer, 1)) {
+        if (c == '\\' && lexer_peek(lexer, 1)) {
             if (out + 2 >= sizeof(token->text)) return 0;
             token->text[out++] = c;
             lexer_advance(lexer);
@@ -142,7 +150,7 @@ static int lexer_read_quoted(lexer_t *lexer, token_t *token, char quote) {
     if (lexer_peek(lexer, 0) != quote) return 0;
     lexer_advance(lexer);
 
-    token->text[out] = '\\0';
+    token->text[out] = '\0';
     return 1;
 }
 
@@ -191,7 +199,7 @@ static token_t lexer_next(lexer_t *lexer) {
 
         if (indent > current) {
             if (lexer->indent_top + 1 >= MAX_INDENTS)
-                return lexer_make_token(TOK_EOF, "<indent-too-deep>", lexer->line, lexer->column);
+                return lexer_make_token(TOK_ERROR, "<indent-too-deep>", lexer->line, lexer->column);
 
             lexer->indent_stack[++lexer->indent_top] = indent;
             lexer->at_line_start = 0;
@@ -206,7 +214,7 @@ static token_t lexer_next(lexer_t *lexer) {
             }
 
             if (indent != lexer->indent_stack[lexer->indent_top]) {
-                return lexer_make_token(TOK_EOF, "<invalid-indent>", lexer->line, lexer->column);
+                return lexer_make_token(TOK_ERROR, "<invalid-indent>", lexer->line, lexer->column);
             }
 
             if (lexer->pending_dedents > 0) {
@@ -323,7 +331,7 @@ static token_t lexer_next(lexer_t *lexer) {
         token.text[0] = '\0';
 
         if (!lexer_read_quoted(lexer, &token, c))
-            return lexer_make_token(TOK_STRING, "<unterminated>", line, column);
+            return lexer_make_token(TOK_ERROR, "<invalid-string>", line, column);
         return token;
     }
 
@@ -347,17 +355,20 @@ static token_t lexer_next(lexer_t *lexer) {
     }
 }
 
+static const char *token_type_name(token_type_t type);
+
 static void lexer_dump(const char *source) {
     lexer_t lexer;
     lexer_init(&lexer, source);
 
     for (;;) {
         token_t token = lexer_next(&lexer);
-        printf("%zu:%zu  %-10s  %s\\n",
+
+        printf("%zu:%zu  %-10s  %s\n",
                token.line, token.column,
                token_type_name(token.type), token.text);
 
-        if (token.type == TOK_EOF)
+        if (token.type == TOK_ERROR || token.type == TOK_EOF)
             break;
     }
 }
@@ -375,6 +386,7 @@ static const char *token_type_name(token_type_t type) {
         case TOK_OPERATOR: return "OPERATOR";
         case TOK_DELIMITER: return "DELIMITER";
         case TOK_KEYWORD: return "KEYWORD";
+        case TOK_ERROR: return "ERROR";
         default: return "UNKNOWN";
     }
 }
@@ -2021,7 +2033,7 @@ int main(int argc, char *argv[]) {
 
             size_t read_size = fread(source_copy, 1, (size_t)size, fp);
             fclose(fp);
-            source_copy[read_size] = '\\0';
+            source_copy[read_size] = '\0';
             lexer_dump(source_copy);
             free(source_copy);
         } else {
