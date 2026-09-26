@@ -1833,10 +1833,29 @@ int main(int argc, char *argv[]) {
         run_after = 1;
     }
 
-    char compile_cmd[2048];
-    snprintf(compile_cmd, sizeof(compile_cmd), "gcc -Wno-unused-function -Wno-unused-variable -O2 %s -o %s -lm", tmp_c_path, bin_path);
+    size_t compile_cmd_len = strlen(tmp_c_path) + strlen(bin_path) + 64;
+    char *compile_cmd = malloc(compile_cmd_len);
+    if (!compile_cmd) {
+        fprintf(stderr, "pythont: falha ao alocar comando de compilacao\n");
+        unlink(tmp_c_path);
+        utilipc_close();
+        return 1;
+    }
+
+    int compile_written = snprintf(compile_cmd, compile_cmd_len,
+        "gcc -Wno-unused-function -Wno-unused-variable -O2 %s -o %s -lm",
+        tmp_c_path, bin_path);
+
+    if (compile_written < 0 || (size_t)compile_written >= compile_cmd_len) {
+        fprintf(stderr, "pythont: comando de compilacao excedeu o buffer\n");
+        free(compile_cmd);
+        unlink(tmp_c_path);
+        utilipc_close();
+        return 1;
+    }
 
     int comp_res = system(compile_cmd);
+    free(compile_cmd);
     unlink(tmp_c_path);
 
     if (comp_res != 0) {
