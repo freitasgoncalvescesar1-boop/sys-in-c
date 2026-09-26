@@ -1323,7 +1323,10 @@ static void transpile_line(char *line, int indent) {
             emit("    py_dict_init(&%s);\n", vstart);
             char inner_dict[2048];
             size_t inner_len = elen - 2;
-            if (inner_len >= sizeof(inner_dict)) inner_len = sizeof(inner_dict) - 1;
+            if (inner_len >= sizeof(inner_dict)) {
+                fprintf(stderr, "pythont: dictionary literal is too large\n");
+                return;
+            }
             memcpy(inner_dict, vexpr_start + 1, inner_len);
             inner_dict[inner_len] = '\0';
 
@@ -1362,7 +1365,10 @@ static void transpile_line(char *line, int indent) {
             if (elen > 2) {
                 char items_only[2048];
                 size_t items_len = elen - 2;
-                if (items_len >= sizeof(items_only)) items_len = sizeof(items_only) - 1;
+                if (items_len >= sizeof(items_only)) {
+                    fprintf(stderr, "pythont: list literal is too large\n");
+                    return;
+                }
                 memcpy(items_only, vexpr_start + 1, items_len);
                 items_only[items_len] = '\0';
                 int elem_count = 1;
