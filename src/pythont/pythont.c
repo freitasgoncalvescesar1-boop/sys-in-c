@@ -336,18 +336,28 @@ static token_t lexer_next(lexer_t *lexer) {
     }
 
     {
-        char text[3] = { c, '\0', '\0' };
+        char text[4] = { c, '\0', '\0', '\0' };
         char next = lexer_peek(lexer, 1);
+        char third = lexer_peek(lexer, 2);
 
-        if ((c == '=' || c == '!' || c == '<' || c == '>') && next == '=') {
+        if (((c == '*' && next == '*') || (c == '/' && next == '/') ||
+             (c == '<' && next == '<') || (c == '>' && next == '>')) && third == '=') {
+            text[1] = next;
+            text[2] = '=';
+        } else if ((c == '=' || c == '!' || c == '<' || c == '>' ||
+                    c == '+' || c == '-' || c == '*' || c == '/' ||
+                    c == '%' || c == '&' || c == '|' || c == '^' || c == '@') &&
+                   next == '=') {
             text[1] = '=';
         } else if ((c == '*' && next == '*') || (c == '/' && next == '/') ||
+                   (c == '<' && next == '<') || (c == '>' && next == '>') ||
                    (c == '-' && next == '>') || (c == '=' && next == '>')) {
             text[1] = next;
         }
 
         lexer_advance(lexer);
         if (text[1]) lexer_advance(lexer);
+        if (text[2]) lexer_advance(lexer);
 
         token_type_t type =
             strchr("()[]{}:,.;", text[0]) ? TOK_DELIMITER : TOK_OPERATOR;
@@ -410,8 +420,10 @@ typedef enum {
     AST_BINARY,
     AST_CALL,
     AST_LIST,
+    AST_TUPLE,
     AST_DICT,
     AST_INDEX,
+    AST_SLICE,
     AST_MEMBER,
     AST_ASSIGN
 } ast_kind_t;
@@ -449,11 +461,6 @@ static ast_node_t *ast_new(ast_kind_t kind, const char *text) {
 static void ast_next(ast_parser_t *parser) {
     parser->current = lexer_next(&parser->lexer);
     if (parser->current.type == TOK_ERROR) parser->error = 1;
-}
-
-static int ast_is_operator(const ast_parser_t *parser, const char *op) {
-    return parser->current.type == TOK_OPERATOR &&
-           strcmp(parser->current.text, op) == 0;
 }
 
 static int ast_is_delimiter(const ast_parser_t *parser, const char *delim) {
@@ -578,13 +585,48 @@ static ast_node_t *ast_parse_primary(ast_parser_t *parser) {
 
     if (ast_is_delimiter(parser, "(")) {
         ast_next(parser);
-        ast_node_t *node = ast_parse_expression(parser, 0);
-        if (!node || !ast_is_delimiter(parser, ")")) {
+
+        if (ast_is_delimiter(parser, ")")) {
+            ast_node_t *tuple = ast_new(AST_TUPLE, "tuple");
+            if (!tuple) return NULL;
+            ast_next(parser);
+            return tuple;
+        }
+
+        ast_node_t *first = ast_parse_expression(parser, 0);
+        if (!first) return NULL;
+
+        if (!ast_is_delimiter(parser, ",")) {
+            if (!ast_is_delimiter(parser, ")")) {
+                parser->error = 1;
+                return NULL;
+            }
+            ast_next(parser);
+            return first;
+        }
+
+        ast_node_t *tuple = ast_new(AST_TUPLE, "tuple");
+        if (!tuple) return NULL;
+        tuple->args[tuple->arg_count++] = first;
+
+        while (ast_is_delimiter(parser, ",")) {
+            ast_next(parser);
+            if (ast_is_delimiter(parser, ")")) break;
+            if (tuple->arg_count >= AST_MAX_ARGS) {
+                parser->error = 1;
+                return NULL;
+            }
+            ast_node_t *item = ast_parse_expression(parser, 0);
+            if (!item) return NULL;
+            tuple->args[tuple->arg_count++] = item;
+        }
+
+        if (!ast_is_delimiter(parser, ")")) {
             parser->error = 1;
             return NULL;
         }
         ast_next(parser);
-        return node;
+        return tuple;
     }
 
     if ((parser->current.type == TOK_OPERATOR &&
@@ -649,8 +691,46 @@ static ast_node_t *ast_parse_postfix(ast_parser_t *parser) {
 
         if (ast_is_delimiter(parser, "[")) {
             ast_next(parser);
-            ast_node_t *index = ast_parse_expression(parser, 0);
-            if (!index || !ast_is_delimiter(parser, "]")) {
+
+            ast_node_t *start = NULL;
+            if (!ast_is_delimiter(parser, ":")) {
+                start = ast_parse_expression(parser, 0);
+                if (!start) return NULL;
+            }
+
+            if (ast_is_delimiter(parser, ":")) {
+                ast_node_t *slice = ast_new(AST_SLICE, ":");
+                if (!slice) return NULL;
+                slice->args[0] = start;
+                slice->arg_count = 1;
+                ast_next(parser);
+
+                if (!ast_is_delimiter(parser, ":") && !ast_is_delimiter(parser, "]")) {
+                    slice->args[1] = ast_parse_expression(parser, 0);
+                    if (!slice->args[1]) return NULL;
+                    slice->arg_count = 2;
+                }
+
+                if (ast_is_delimiter(parser, ":")) {
+                    ast_next(parser);
+                    if (!ast_is_delimiter(parser, "]")) {
+                        slice->args[2] = ast_parse_expression(parser, 0);
+                        if (!slice->args[2]) return NULL;
+                        slice->arg_count = 3;
+                    }
+                }
+
+                if (!ast_is_delimiter(parser, "]")) {
+                    parser->error = 1;
+                    return NULL;
+                }
+                ast_next(parser);
+                slice->left = node;
+                node = slice;
+                continue;
+            }
+
+            if (!start || !ast_is_delimiter(parser, "]")) {
                 parser->error = 1;
                 return NULL;
             }
@@ -659,7 +739,7 @@ static ast_node_t *ast_parse_postfix(ast_parser_t *parser) {
             ast_node_t *indexed = ast_new(AST_INDEX, "[]");
             if (!indexed) return NULL;
             indexed->left = node;
-            indexed->right = index;
+            indexed->right = start;
             node = indexed;
             continue;
         }
@@ -715,20 +795,34 @@ static ast_node_t *ast_parse_statement(ast_parser_t *parser) {
     ast_node_t *left = ast_parse_expression(parser, 0);
     if (!left) return NULL;
 
-    if (ast_is_operator(parser, "=")) {
-        if (left->kind != AST_IDENTIFIER) {
-            parser->error = 1;
-            return NULL;
-        }
-        ast_next(parser);
-        ast_node_t *value = ast_parse_expression(parser, 0);
-        if (!value) return NULL;
+    if (parser->current.type == TOK_OPERATOR) {
+        const char *op = parser->current.text;
+        int is_assignment = !strcmp(op, "=") || !strcmp(op, "+=") ||
+                            !strcmp(op, "-=") || !strcmp(op, "*=") ||
+                            !strcmp(op, "/=") || !strcmp(op, "//=") ||
+                            !strcmp(op, "%=") || !strcmp(op, "**=") ||
+                            !strcmp(op, "&=") || !strcmp(op, "|=") ||
+                            !strcmp(op, "^=") || !strcmp(op, "<<=") ||
+                            !strcmp(op, ">>=");
+        int valid_target = left->kind == AST_IDENTIFIER ||
+                           left->kind == AST_MEMBER || left->kind == AST_INDEX;
+        if (is_assignment) {
+            if (!valid_target) {
+                parser->error = 1;
+                return NULL;
+            }
+            char assign_op[LEX_TOKEN_TEXT];
+            snprintf(assign_op, sizeof(assign_op), "%s", op);
+            ast_next(parser);
+            ast_node_t *value = ast_parse_expression(parser, 0);
+            if (!value) return NULL;
 
-        ast_node_t *assign = ast_new(AST_ASSIGN, "=");
-        if (!assign) return NULL;
-        assign->left = left;
-        assign->right = value;
-        return assign;
+            ast_node_t *assign = ast_new(AST_ASSIGN, assign_op);
+            if (!assign) return NULL;
+            assign->left = left;
+            assign->right = value;
+            return assign;
+        }
     }
 
     return left;
@@ -743,8 +837,10 @@ static const char *ast_kind_name(ast_kind_t kind) {
         case AST_BINARY: return "Binary";
         case AST_CALL: return "Call";
         case AST_LIST: return "List";
+        case AST_TUPLE: return "Tuple";
         case AST_DICT: return "Dict";
         case AST_INDEX: return "Index";
+        case AST_SLICE: return "Slice";
         case AST_MEMBER: return "Member";
         case AST_ASSIGN: return "Assign";
         default: return "Unknown";
@@ -772,7 +868,9 @@ static void ast_dump_node(const ast_node_t *node, int depth) {
         return;
     }
 
-    if (node->kind == AST_LIST) {
+    if (node->kind == AST_LIST || node->kind == AST_TUPLE || node->kind == AST_SLICE) {
+        if (node->kind == AST_SLICE && node->left)
+            ast_dump_node(node->left, depth + 1);
         for (size_t i = 0; i < node->arg_count; ++i)
             ast_dump_node(node->args[i], depth + 1);
         return;
@@ -2477,7 +2575,7 @@ int main(int argc, char *argv[]) {
             }
             size_t read_size = fread(source_copy, 1, (size_t)size, fp);
             fclose(fp);
-            source_copy[read_size] = '\\0';
+            source_copy[read_size] = '\0';
             source = source_copy;
         }
 
@@ -2741,3 +2839,282 @@ int main(int argc, char *argv[]) {
         "}\n"
         "__attribute__((unused)) static inline int64_t py_sum(const int64_t *arr, int len) {\n"
         "    int64_t acc = 0;\n"
+        "    for (int i = 0; i < len; i++) acc += arr[i];\n"
+        "    return acc;\n"
+        "}\n"
+        "__attribute__((unused)) static inline char *py_input(const char *prompt) {\n"
+        "    if (prompt && *prompt) { printf(\"%%s\", prompt); fflush(stdout); }\n"
+        "    static char in_buf[1024];\n"
+        "    if (!fgets(in_buf, sizeof(in_buf), stdin)) return \"\";\n"
+        "    size_t l = strlen(in_buf);\n"
+        "    while (l > 0 && (in_buf[l-1] == '\\r' || in_buf[l-1] == '\\n')) in_buf[--l] = '\\0';\n"
+        "    return in_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_upper(const char *s) {\n"
+        "    static char u_buf[1024]; size_t i = 0;\n"
+        "    for (; s[i] && i < 1023; i++) u_buf[i] = (char)toupper((unsigned char)s[i]);\n"
+        "    u_buf[i] = '\\0'; return u_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_lower(const char *s) {\n"
+        "    static char l_buf[1024]; size_t i = 0;\n"
+        "    for (; s[i] && i < 1023; i++) l_buf[i] = (char)tolower((unsigned char)s[i]);\n"
+        "    l_buf[i] = '\\0'; return l_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_strip(const char *s) {\n"
+        "    static char st_buf[1024];\n"
+        "    while (*s && isspace((unsigned char)*s)) s++;\n"
+        "    strncpy(st_buf, s, 1023); st_buf[1023] = '\\0';\n"
+        "    size_t l = strlen(st_buf);\n"
+        "    while (l > 0 && isspace((unsigned char)st_buf[l - 1])) st_buf[--l] = '\\0';\n"
+        "    return st_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_capitalize(const char *s) {\n"
+        "    static char c_buf[1024];\n"
+        "    strncpy(c_buf, s, 1023); c_buf[1023] = '\\0';\n"
+        "    if (c_buf[0]) c_buf[0] = (char)toupper((unsigned char)c_buf[0]);\n"
+        "    for (size_t i = 1; c_buf[i]; i++) c_buf[i] = (char)tolower((unsigned char)c_buf[i]);\n"
+        "    return c_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_title(const char *s) {\n"
+        "    static char t_buf[1024];\n"
+        "    strncpy(t_buf, s, 1023); t_buf[1023] = '\\0';\n"
+        "    int cap = 1;\n"
+        "    for (size_t i = 0; t_buf[i]; i++) {\n"
+        "        if (isspace((unsigned char)t_buf[i])) cap = 1;\n"
+        "        else if (cap) { t_buf[i] = (char)toupper((unsigned char)t_buf[i]); cap = 0; }\n"
+        "        else t_buf[i] = (char)tolower((unsigned char)t_buf[i]);\n"
+        "    }\n"
+        "    return t_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline int64_t py_str_startswith(const char *s, const char *prefix) {\n"
+        "    if (!s || !prefix) return 0;\n"
+        "    return strncmp(s, prefix, strlen(prefix)) == 0;\n"
+        "}\n"
+        "__attribute__((unused)) static inline int64_t py_str_endswith(const char *s, const char *suffix) {\n"
+        "    if (!s || !suffix) return 0;\n"
+        "    size_t sl = strlen(s), sufl = strlen(suffix);\n"
+        "    if (sufl > sl) return 0;\n"
+        "    return strcmp(s + sl - sufl, suffix) == 0;\n"
+        "}\n"
+        "__attribute__((unused)) static inline int64_t py_str_count(const char *s, const char *sub) {\n"
+        "    if (!s || !sub || !*sub) return 0;\n"
+        "    int64_t count = 0; size_t sub_len = strlen(sub);\n"
+        "    while ((s = strstr(s, sub)) != NULL) { count++; s += sub_len; }\n"
+        "    return count;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_replace(const char *s, const char *old_w, const char *new_w) {\n"
+        "    static char rep_buf[2048]; rep_buf[0] = '\\0';\n"
+        "    if (!s || !old_w || !new_w) return s ? s : \"\";\n"
+        "    size_t rep_len = 0, old_len = strlen(old_w), new_len = strlen(new_w);\n"
+        "    const char *p = s;\n"
+        "    if (old_len == 0) { snprintf(rep_buf, sizeof(rep_buf), \"%%s\", s); return rep_buf; }\n"
+        "    while (*p) {\n"
+        "        const char *found = strstr(p, old_w);\n"
+        "        size_t chunk = found ? (size_t)(found - p) : strlen(p);\n"
+        "        size_t extra = found ? new_len : 0;\n"
+        "        if (rep_len + chunk + extra + 1 >= sizeof(rep_buf)) return \"[replace too large]\";\n"
+        "        memcpy(rep_buf + rep_len, p, chunk); rep_len += chunk;\n"
+        "        if (!found) break;\n"
+        "        memcpy(rep_buf + rep_len, new_w, new_len); rep_len += new_len;\n"
+        "        p = found + old_len;\n"
+        "    }\n"
+        "    rep_buf[rep_len] = '\\0'; return rep_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_str_slice(const char *s, int64_t start, int64_t end, int64_t step) {\n"
+        "    static char slice_buf[1024]; if (!s) return \"\";\n"
+        "    int64_t len = (int64_t)strlen(s);\n"
+        "    if (step == 0) step = 1;\n"
+        "    if (step == -1 && start == 0 && end == 999999) {\n"
+        "        int64_t pos = 0;\n"
+        "        for (int64_t i = len - 1; i >= 0 && pos < 1023; i--) slice_buf[pos++] = s[i];\n"
+        "        slice_buf[pos] = '\\0'; return slice_buf;\n"
+        "    }\n"
+        "    if (start < 0) start += len; if (end < 0) end += len;\n"
+        "    if (start < 0) start = 0; if (end > len) end = len;\n"
+        "    int64_t pos = 0;\n"
+        "    for (int64_t i = start; (step > 0 ? i < end : i > end) && pos < 1023; i += step) {\n"
+        "        if (i >= 0 && i < len) slice_buf[pos++] = s[i];\n"
+        "    }\n"
+        "    slice_buf[pos] = '\\0'; return slice_buf;\n"
+        "}\n\n"
+        "typedef struct {\n"
+        "    FILE *fp; int is_open;\n"
+        "} py_file_t;\n\n"
+        "__attribute__((unused)) static inline py_file_t py_open(const char *path, const char *mode) {\n"
+        "    py_file_t pf; pf.fp = fopen(path, mode); pf.is_open = (pf.fp != NULL); return pf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline void py_file_write(py_file_t *pf, const char *str) {\n"
+        "    if (pf && pf->fp) { fputs(str, pf->fp); fflush(pf->fp); }\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_file_read(py_file_t *pf) {\n"
+        "    static char file_read_buf[65536]; file_read_buf[0] = '\\0';\n"
+        "    if (pf && pf->fp) {\n"
+        "        size_t n = fread(file_read_buf, 1, sizeof(file_read_buf) - 1, pf->fp);\n"
+        "        file_read_buf[n] = '\\0';\n"
+        "    }\n"
+        "    return file_read_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline void py_file_close(py_file_t *pf) {\n"
+        "    if (pf && pf->fp) { fclose(pf->fp); pf->fp = NULL; pf->is_open = 0; }\n"
+        "}\n\n"
+        "typedef struct {\n"
+        "    char key[64]; char val[256]; int used;\n"
+        "} py_dict_entry_t;\n\n"
+        "typedef struct {\n"
+        "    py_dict_entry_t entries[64]; int count;\n"
+        "} py_dict_t;\n\n"
+        "__attribute__((unused)) static inline void py_dict_init(py_dict_t *d) { memset(d, 0, sizeof(py_dict_t)); }\n"
+        "__attribute__((unused)) static inline void py_dict_set_str(py_dict_t *d, const char *k, const char *v) {\n"
+        "    for (int i = 0; i < d->count; i++) {\n"
+        "        if (d->entries[i].used && strcmp(d->entries[i].key, k) == 0) { snprintf(d->entries[i].val, sizeof(d->entries[i].val), \"%%s\", v); return; }\n"
+        "    }\n"
+        "    if (d->count < 64) {\n"
+        "        snprintf(d->entries[d->count].key, sizeof(d->entries[d->count].key), \"%%s\", k);\n"
+        "        snprintf(d->entries[d->count].val, sizeof(d->entries[d->count].val), \"%%s\", v);\n"
+        "        d->entries[d->count].used = 1; d->count++;\n"
+        "    }\n"
+        "}\n"
+        "__attribute__((unused)) static inline void py_dict_set_int(py_dict_t *d, const char *k, int64_t v) {\n"
+        "    char b[64]; snprintf(b, sizeof(b), \"%%lld\", (long long)v); py_dict_set_str(d, k, b);\n"
+        "}\n"
+        "__attribute__((unused)) static inline void py_dict_set_float(py_dict_t *d, const char *k, double v) {\n"
+        "    char b[64]; snprintf(b, sizeof(b), \"%%f\", v); py_dict_set_str(d, k, b);\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_dict_get_val(const py_dict_t *d, const char *k) {\n"
+        "    for (int i = 0; i < d->count; i++) {\n"
+        "        if (d->entries[i].used && strcmp(d->entries[i].key, k) == 0) return d->entries[i].val;\n"
+        "    }\n"
+        "    return \"None\";\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_dict_get_default(const py_dict_t *d, const char *k, const char *def) {\n"
+        "    for (int i = 0; i < d->count; i++) {\n"
+        "        if (d->entries[i].used && strcmp(d->entries[i].key, k) == 0) return d->entries[i].val;\n"
+        "    }\n"
+        "    return def;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_dict_keys(const py_dict_t *d) {\n"
+        "    static char k_buf[2048]; k_buf[0] = '['; k_buf[1] = '\\0';\n"
+        "    for (int i = 0; i < d->count; i++) {\n"
+        "        if (d->entries[i].used) {\n"
+        "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"'%%s'%%s\", d->entries[i].key, (i < d->count - 1) ? \", \" : \"\");\n"
+        "            size_t k_len = strlen(k_buf), tmp_len = strlen(tmp);\n"
+        "            if (k_len + tmp_len + 1 >= sizeof(k_buf)) return \"[dict keys too large]\";\n"
+        "            memcpy(k_buf + k_len, tmp, tmp_len + 1);\n"
+        "        }\n"
+        "    }\n"
+        "    strcat(k_buf, \"]\"); return k_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_dict_values(const py_dict_t *d) {\n"
+        "    static char v_buf[2048]; v_buf[0] = '['; v_buf[1] = '\\0';\n"
+        "    for (int i = 0; i < d->count; i++) {\n"
+        "        if (d->entries[i].used) {\n"
+        "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"%%s%%s\", d->entries[i].val, (i < d->count - 1) ? \", \" : \"\");\n"
+        "            size_t v_len = strlen(v_buf), tmp_len = strlen(tmp);\n"
+        "            if (v_len + tmp_len + 1 >= sizeof(v_buf)) return \"[dict values too large]\";\n"
+        "            memcpy(v_buf + v_len, tmp, tmp_len + 1);\n"
+        "        }\n"
+        "    }\n"
+        "    strcat(v_buf, \"]\"); return v_buf;\n"
+        "}\n\n"
+        "%s\n"
+        "%s\n"
+        "int main(int argc, char *argv[]) {\n"
+        "    (void)argc; (void)argv;\n"
+        "%s\n"
+        "%s\n"
+        "    return 0;\n"
+        "}\n",
+        class_struct_buffer, func_buffer, var_decl_buf, main_buffer)) {
+        utilipc_close();
+        return 1;
+    }
+
+    if (emit_c_only) {
+        printf("%s\n", final_c_code);
+        utilipc_close();
+        return 0;
+    }
+
+    const char *tmp_dir = get_tmp_dir();
+    char tmp_c_path[512];
+    int tmp_path_written = snprintf(tmp_c_path, sizeof(tmp_c_path),
+        "%s/pythont_%d.c", tmp_dir, getpid());
+    if (tmp_path_written < 0 || (size_t)tmp_path_written >= sizeof(tmp_c_path)) {
+        fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
+        utilipc_close();
+        return 1;
+    }
+
+    FILE *c_fp = fopen(tmp_c_path, "w");
+    if (!c_fp) {
+        int fallback_written = snprintf(tmp_c_path, sizeof(tmp_c_path),
+            "pythont_%d.c", getpid());
+        if (fallback_written < 0 || (size_t)fallback_written >= sizeof(tmp_c_path)) {
+            fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
+            utilipc_close();
+            return 1;
+        }
+        c_fp = fopen(tmp_c_path, "w");
+    }
+    if (!c_fp) {
+        fprintf(stderr, "pythont: falha ao criar arquivo C temporario\n");
+        utilipc_close();
+        return 1;
+    }
+    fputs(final_c_code, c_fp);
+    fclose(c_fp);
+
+    char bin_path[512];
+    int run_after = 0;
+
+    if (out_bin) {
+        size_t out_bin_len = strlen(out_bin);
+        if (out_bin_len >= sizeof(bin_path)) {
+            fprintf(stderr, "pythont: caminho do binario excede o limite\n");
+            unlink(tmp_c_path);
+            utilipc_close();
+            return 1;
+        }
+        memcpy(bin_path, out_bin, out_bin_len + 1);
+    } else {
+        int bin_path_written = snprintf(bin_path, sizeof(bin_path),
+            "%s/pythont_bin_%d", tmp_dir, getpid());
+        if (bin_path_written < 0 || (size_t)bin_path_written >= sizeof(bin_path)) {
+            fprintf(stderr, "pythont: caminho do binario excede o limite\n");
+            unlink(tmp_c_path);
+            utilipc_close();
+            return 1;
+        }
+        run_after = 1;
+    }
+
+    char *gcc_args[] = {
+        "gcc", "-Wno-unused-function", "-Wno-unused-variable",
+        "-O2", tmp_c_path, "-o", bin_path, "-lm", NULL
+    };
+    int comp_res = run_process("gcc", gcc_args);
+    unlink(tmp_c_path);
+
+    if (comp_res != 0) {
+        fprintf(stderr, "pythont: erro de compilacao do codigo C gerado\n");
+        utilipc_close();
+        return 1;
+    }
+
+    if (run_after) {
+        char *run_args[] = { bin_path, NULL };
+        int ret = run_process(bin_path, run_args);
+        unlink(bin_path);
+        utilipc_close();
+
+        if (ret < 0) return 1;
+        if (WIFEXITED(ret)) return WEXITSTATUS(ret);
+        if (WIFSIGNALED(ret)) return 128 + WTERMSIG(ret);
+        return 1;
+    } else {
+        printf("  \033[1;32m[✔ SUCESSO]\033[0m Binario nativo C gerado em: \033[1;36m%s\033[0m\n", bin_path);
+    }
+
+    utilipc_close();
+    return 0;
+}
