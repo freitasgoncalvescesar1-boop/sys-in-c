@@ -176,14 +176,21 @@ static void emit_class_struct(const char *fmt, ...) {
     char buf[2048];
     va_list args;
     va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
+    int n = vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    size_t l = strlen(buf);
-    if (class_pos + l < sizeof(class_struct_buffer) - 1) {
-        strcpy(class_struct_buffer + class_pos, buf);
-        class_pos += l;
+    if (n < 0 || (size_t)n >= sizeof(buf)) {
+        fprintf(stderr, "pythont: generated class code is too large\n");
+        return;
     }
+
+    size_t l = (size_t)n;
+    if (class_pos + l >= sizeof(class_struct_buffer) - 1) {
+        fprintf(stderr, "pythont: class code buffer exhausted\n");
+        return;
+    }
+    memcpy(class_struct_buffer + class_pos, buf, l + 1);
+    class_pos += l;
 }
 
 static int format_checked(char *out, size_t cap, const char *fmt, ...) {
@@ -203,21 +210,29 @@ static void emit(const char *fmt, ...) {
     char buf[2048];
     va_list args;
     va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
+    int n = vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
+    if (n < 0 || (size_t)n >= sizeof(buf)) {
+        fprintf(stderr, "pythont: generated code fragment is too large\n");
+        return;
+    }
+
+    size_t l = (size_t)n;
     if (inside_function) {
-        size_t l = strlen(buf);
-        if (func_pos + l < (MAX_CODE_SZ / 2) - 1) {
-            strcpy(func_buffer + func_pos, buf);
-            func_pos += l;
+        if (func_pos + l >= (MAX_CODE_SZ / 2) - 1) {
+            fprintf(stderr, "pythont: function code buffer exhausted\n");
+            return;
         }
+        memcpy(func_buffer + func_pos, buf, l + 1);
+        func_pos += l;
     } else {
-        size_t l = strlen(buf);
-        if (main_pos + l < (MAX_CODE_SZ / 2) - 1) {
-            strcpy(main_buffer + main_pos, buf);
-            main_pos += l;
+        if (main_pos + l >= (MAX_CODE_SZ / 2) - 1) {
+            fprintf(stderr, "pythont: main code buffer exhausted\n");
+            return;
         }
+        memcpy(main_buffer + main_pos, buf, l + 1);
+        main_pos += l;
     }
 }
 
@@ -257,6 +272,18 @@ static void strip_inline_comment(char *line) {
     }
 }
 
+static int append_fragment(char *out, size_t *pos, size_t cap, const char *src) {
+    size_t n = strlen(src);
+    if (*pos > cap - 1 || n >= cap - *pos) {
+        fprintf(stderr, "pythont: expression buffer exhausted\n");
+        return 0;
+    }
+    memcpy(out + *pos, src, n);
+    *pos += n;
+    out[*pos] = '\0';
+    return 1;
+}
+
 static void replace_operators(char *expr) {
     char tmp[4096] = "";
     size_t t = 0;
@@ -264,43 +291,43 @@ static void replace_operators(char *expr) {
 
     for (size_t i = 0; i < len; i++) {
         if (strncmp(expr + i, " and ", 5) == 0) {
-            strcat(tmp + t, " && "); t += 4; i += 4;
+            if (!append_fragment(tmp, &t, sizeof(tmp), " && ")) return; i += 4;
         } else if (strncmp(expr + i, " or ", 4) == 0) {
-            strcat(tmp + t, " || "); t += 4; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), " || ")) return; i += 3;
         } else if (strncmp(expr + i, "not ", 4) == 0) {
-            strcat(tmp + t, "!"); t += 1; i += 3;
-        } else if (strncmp(expr + i, "True", 4) == 0 && !isalnum((unsigned char)expr[i+4])) {
-            strcat(tmp + t, "1"); t += 1; i += 3;
-        } else if (strncmp(expr + i, "False", 5) == 0 && !isalnum((unsigned char)expr[i+5])) {
-            strcat(tmp + t, "0"); t += 1; i += 4;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "!")) return; i += 3;
+        } else if (strncmp(expr + i, "True", 4) == 0 && !isalnum((unsigned char)expr[i+4]) && expr[i+4] != '_') {
+            if (!append_fragment(tmp, &t, sizeof(tmp), "1")) return; i += 3;
+        } else if (strncmp(expr + i, "False", 5) == 0 && !isalnum((unsigned char)expr[i+5]) && expr[i+5] != '_') {
+            if (!append_fragment(tmp, &t, sizeof(tmp), "0")) return; i += 4;
         } else if (strncmp(expr + i, "None", 4) == 0 && !isalnum((unsigned char)expr[i+4])) {
-            strcat(tmp + t, "NULL"); t += 4; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "NULL")) return; i += 3;
         } else if (strncmp(expr + i, "min(", 4) == 0) {
-            strcat(tmp + t, "py_min("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_min(")) return; i += 3;
         } else if (strncmp(expr + i, "max(", 4) == 0) {
-            strcat(tmp + t, "py_max("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_max(")) return; i += 3;
         } else if (strncmp(expr + i, "abs(", 4) == 0) {
-            strcat(tmp + t, "py_abs("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_abs(")) return; i += 3;
         } else if (strncmp(expr + i, "int(", 4) == 0) {
-            strcat(tmp + t, "py_int("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_int(")) return; i += 3;
         } else if (strncmp(expr + i, "str(", 4) == 0) {
-            strcat(tmp + t, "py_str("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_str(")) return; i += 3;
         } else if (strncmp(expr + i, "float(", 6) == 0) {
-            strcat(tmp + t, "py_float("); t += 9; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_float(")) return; i += 5;
         } else if (strncmp(expr + i, "round(", 6) == 0) {
-            strcat(tmp + t, "py_round("); t += 9; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_round(")) return; i += 5;
         } else if (strncmp(expr + i, "bin(", 4) == 0) {
-            strcat(tmp + t, "py_bin("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_bin(")) return; i += 3;
         } else if (strncmp(expr + i, "hex(", 4) == 0) {
-            strcat(tmp + t, "py_hex("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_hex(")) return; i += 3;
         } else if (strncmp(expr + i, "oct(", 4) == 0) {
-            strcat(tmp + t, "py_oct("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_oct(")) return; i += 3;
         } else if (strncmp(expr + i, "chr(", 4) == 0) {
-            strcat(tmp + t, "py_chr("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_chr(")) return; i += 3;
         } else if (strncmp(expr + i, "ord(", 4) == 0) {
-            strcat(tmp + t, "py_ord("); t += 7; i += 3;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_ord(")) return; i += 3;
         } else if (strncmp(expr + i, "input(", 6) == 0) {
-            strcat(tmp + t, "py_input("); t += 9; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "py_input(")) return; i += 5;
         } else if (strncmp(expr + i, "sum(", 4) == 0) {
             char target[64] = "";
             size_t k = i + 4, p = 0;
@@ -309,8 +336,7 @@ static void replace_operators(char *expr) {
             if (expr[k] == ')') {
                 char sum_call[256];
                 snprintf(sum_call, sizeof(sum_call), "py_sum(%s, len_%s)", target, target);
-                strcat(tmp + t, sum_call);
-                t += strlen(sum_call);
+                if (!append_fragment(tmp, &t, sizeof(tmp), sum_call)) return;
                 i = k;
             }
         } else if (strncmp(expr + i, "len(", 4) == 0) {
@@ -323,42 +349,43 @@ static void replace_operators(char *expr) {
                 if (s && s->type == VAR_LIST) {
                     char len_call[128];
                     snprintf(len_call, sizeof(len_call), "len_%s", target);
-                    strcat(tmp + t, len_call);
-                    t += strlen(len_call);
+                    if (!append_fragment(tmp, &t, sizeof(tmp), len_call)) return;
                 } else if (s && s->type == VAR_DICT) {
                     char len_call[128];
                     snprintf(len_call, sizeof(len_call), "(int64_t)%s.count", target);
-                    strcat(tmp + t, len_call);
-                    t += strlen(len_call);
+                    if (!append_fragment(tmp, &t, sizeof(tmp), len_call)) return;
                 } else {
                     char len_call[128];
                     snprintf(len_call, sizeof(len_call), "(int64_t)strlen(%s)", target);
-                    strcat(tmp + t, len_call);
-                    t += strlen(len_call);
+                    if (!append_fragment(tmp, &t, sizeof(tmp), len_call)) return;
                 }
                 i = k;
             }
         } else if (strncmp(expr + i, "math.sqrt(", 10) == 0) {
-            strcat(tmp + t, "sqrt("); t += 5; i += 9;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "sqrt(")) return; i += 9;
         } else if (strncmp(expr + i, "math.sin(", 9) == 0) {
-            strcat(tmp + t, "sin("); t += 4; i += 8;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "sin(")) return; i += 8;
         } else if (strncmp(expr + i, "math.cos(", 9) == 0) {
-            strcat(tmp + t, "cos("); t += 4; i += 8;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "cos(")) return; i += 8;
         } else if (strncmp(expr + i, "math.floor(", 11) == 0) {
-            strcat(tmp + t, "floor("); t += 6; i += 10;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "floor(")) return; i += 10;
         } else if (strncmp(expr + i, "math.ceil(", 10) == 0) {
-            strcat(tmp + t, "ceil("); t += 5; i += 9;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "ceil(")) return; i += 9;
         } else if (strncmp(expr + i, "math.pow(", 9) == 0) {
-            strcat(tmp + t, "pow("); t += 4; i += 8;
-        } else if (strncmp(expr + i, "math.pi", 7) == 0 && !isalnum((unsigned char)expr[i+7])) {
-            strcat(tmp + t, "3.14159265358979323846"); t += 22; i += 6;
-        } else if (strncmp(expr + i, "math.e", 6) == 0 && !isalnum((unsigned char)expr[i+6])) {
-            strcat(tmp + t, "2.71828182845904523536"); t += 22; i += 5;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "pow(")) return; i += 8;
+        } else if (strncmp(expr + i, "math.pi", 7) == 0 && !isalnum((unsigned char)expr[i+7]) && expr[i+7] != '_') {
+            if (!append_fragment(tmp, &t, sizeof(tmp), "3.14159265358979323846")) return; i += 6;
+        } else if (strncmp(expr + i, "math.e", 6) == 0 && !isalnum((unsigned char)expr[i+6]) && expr[i+6] != '_') {
+            if (!append_fragment(tmp, &t, sizeof(tmp), "2.71828182845904523536")) return; i += 5;
         } else if (strncmp(expr + i, "//", 2) == 0) {
-            strcat(tmp + t, "/"); t += 1; i += 1;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "/")) return; i += 1;
         } else if (strncmp(expr + i, "self.", 5) == 0) {
-            strcat(tmp + t, "self->"); t += 6; i += 4;
+            if (!append_fragment(tmp, &t, sizeof(tmp), "self->")) return; i += 4;
         } else {
+            if (t + 1 >= sizeof(tmp)) {
+                fprintf(stderr, "pythont: expression buffer exhausted\n");
+                return;
+            }
             tmp[t++] = expr[i];
             tmp[t] = '\0';
         }
@@ -724,7 +751,7 @@ static void transpile_print(const char *args_str) {
         size_t token_len = p - token_start;
         char token[1024];
         if (token_len >= sizeof(token)) token_len = sizeof(token) - 1;
-        strncpy(token, token_start, token_len);
+        memcpy(token, token_start, token_len);
         token[token_len] = '\0';
         if (*p == ',') p++;
 
@@ -796,7 +823,7 @@ static void handle_dedent(int new_indent, int is_else_or_elif) {
     while (block_top > 0 && new_indent < block_indent[block_top - 1]) {
         block_type_t popped = block_type[block_top - 1];
         char b_var[64];
-        strncpy(b_var, block_var[block_top - 1], 63);
+        memcpy(b_var, block_var[block_top - 1], 63);
         b_var[63] = '\0';
         block_top--;
 
@@ -843,7 +870,8 @@ static void transpile_line(char *line, int indent) {
         if (block_top < MAX_INDENTS) {
             block_indent[block_top] = indent;
             block_type[block_top] = pending_type;
-            strncpy(block_var[block_top], pending_var, 63);
+            memcpy(block_var[block_top], pending_var, 63);
+            block_var[block_top][63] = '\0';
             block_top++;
         }
         pending_block = 0;
@@ -868,7 +896,8 @@ static void transpile_line(char *line, int indent) {
 
         pending_block = 1;
         pending_type = BLOCK_WITH;
-        strncpy(pending_var, var_name, 63);
+        memcpy(pending_var, var_name, 63);
+        pending_var[63] = '\0';
         return;
     }
 
@@ -893,9 +922,11 @@ static void transpile_line(char *line, int indent) {
         char *cname = line + 6;
         while (*cname == ' ') cname++;
 
-        strncpy(active_class, cname, 63);
+        memcpy(active_class, cname, 63);
+        active_class[63] = '\0';
         if (class_count < MAX_CLASSES) {
-            strncpy(classes[class_count].class_name, cname, 63);
+            memcpy(classes[class_count].class_name, cname, 63);
+            classes[class_count].class_name[63] = '\0';
             classes[class_count].field_count = 0;
             classes[class_count].method_count = 0;
             class_count++;
@@ -1431,9 +1462,23 @@ static void run_interactive_repl(void) {
 
         if (strcmp(line_buf, "exit()") == 0 || strcmp(line_buf, "quit()") == 0 || strcmp(line_buf, "exit") == 0) break;
 
-        char exec_cmd[2048];
-        snprintf(exec_cmd, sizeof(exec_cmd), "./pythont -e \"%s\"", line_buf);
-        (void)!system(exec_cmd);
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("pythont: fork");
+            continue;
+        }
+        if (pid == 0) {
+            execl("./pythont", "./pythont", "-e", line_buf, (char *)NULL);
+            perror("pythont: execl");
+            _exit(127);
+        }
+        int status;
+        if (waitpid(pid, &status, 0) < 0) {
+            perror("pythont: waitpid");
+            continue;
+        }
+        if (WIFSIGNALED(status))
+            fprintf(stderr, "pythont: REPL child terminated by signal %d\n", WTERMSIG(status));
     }
 }
 
@@ -1517,6 +1562,13 @@ int main(int argc, char *argv[]) {
 
             size_t tl = strlen(trimmed);
             while (tl > 0 && (trimmed[tl-1] == '\r' || trimmed[tl-1] == '\n')) trimmed[--tl] = '\0';
+            size_t needed = strlen(accum) + (accum[0] != '\0' ? 1 : 0) + tl + 1;
+            if (needed > sizeof(accum)) {
+                fprintf(stderr, "pythont: logical Python line exceeds 4095 characters\n");
+                fclose(fp);
+                utilipc_close();
+                return 1;
+            }
             if (accum[0] != '\0') strcat(accum, " ");
             strcat(accum, trimmed);
 
@@ -1548,7 +1600,14 @@ int main(int argc, char *argv[]) {
         else if (symbols[i].type == VAR_FILE) snprintf(dline, sizeof(dline), "    py_file_t %s = {0};\n", symbols[i].name);
         else if (symbols[i].type == VAR_OBJ) snprintf(dline, sizeof(dline), "    %s %s = {0};\n", symbols[i].class_type, symbols[i].name);
         else dline[0] = '\0';
-        strcat(var_decl_buf, dline);
+        size_t dlen = strlen(dline);
+        size_t decl_len = strlen(var_decl_buf);
+        if (decl_len > sizeof(var_decl_buf) - 1 || dlen >= sizeof(var_decl_buf) - decl_len) {
+            fprintf(stderr, "pythont: variable declaration buffer exhausted\n");
+            utilipc_close();
+            return 1;
+        }
+        memcpy(var_decl_buf + decl_len, dline, dlen + 1);
     }
 
     char final_c_code[MAX_CODE_SZ];
@@ -1808,11 +1867,23 @@ int main(int argc, char *argv[]) {
 
     const char *tmp_dir = get_tmp_dir();
     char tmp_c_path[512];
-    snprintf(tmp_c_path, sizeof(tmp_c_path), "%s/pythont_%d.c", tmp_dir, getpid());
+    int tmp_path_written = snprintf(tmp_c_path, sizeof(tmp_c_path),
+        "%s/pythont_%d.c", tmp_dir, getpid());
+    if (tmp_path_written < 0 || (size_t)tmp_path_written >= sizeof(tmp_c_path)) {
+        fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
+        utilipc_close();
+        return 1;
+    }
 
     FILE *c_fp = fopen(tmp_c_path, "w");
     if (!c_fp) {
-        snprintf(tmp_c_path, sizeof(tmp_c_path), "pythont_%d.c", getpid());
+        int fallback_written = snprintf(tmp_c_path, sizeof(tmp_c_path),
+            "pythont_%d.c", getpid());
+        if (fallback_written < 0 || (size_t)fallback_written >= sizeof(tmp_c_path)) {
+            fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
+            utilipc_close();
+            return 1;
+        }
         c_fp = fopen(tmp_c_path, "w");
     }
     if (!c_fp) {
@@ -1827,9 +1898,23 @@ int main(int argc, char *argv[]) {
     int run_after = 0;
 
     if (out_bin) {
-        strncpy(bin_path, out_bin, sizeof(bin_path) - 1);
+        size_t out_bin_len = strlen(out_bin);
+        if (out_bin_len >= sizeof(bin_path)) {
+            fprintf(stderr, "pythont: caminho do binario excede o limite\n");
+            unlink(tmp_c_path);
+            utilipc_close();
+            return 1;
+        }
+        memcpy(bin_path, out_bin, out_bin_len + 1);
     } else {
-        snprintf(bin_path, sizeof(bin_path), "%s/pythont_bin_%d", tmp_dir, getpid());
+        int bin_path_written = snprintf(bin_path, sizeof(bin_path),
+            "%s/pythont_bin_%d", tmp_dir, getpid());
+        if (bin_path_written < 0 || (size_t)bin_path_written >= sizeof(bin_path)) {
+            fprintf(stderr, "pythont: caminho do binario excede o limite\n");
+            unlink(tmp_c_path);
+            utilipc_close();
+            return 1;
+        }
         run_after = 1;
     }
 
@@ -1868,7 +1953,11 @@ int main(int argc, char *argv[]) {
         int ret = system(bin_path);
         unlink(bin_path);
         utilipc_close();
-        return WEXITSTATUS(ret);
+
+        if (ret == -1) return 1;
+        if (WIFEXITED(ret)) return WEXITSTATUS(ret);
+        if (WIFSIGNALED(ret)) return 128 + WTERMSIG(ret);
+        return 1;
     } else {
         printf("  \033[1;32m[✔ SUCESSO]\033[0m Binario nativo C gerado em: \033[1;36m%s\033[0m\n", bin_path);
     }
