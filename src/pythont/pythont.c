@@ -272,6 +272,18 @@ static void strip_inline_comment(char *line) {
     }
 }
 
+static int run_process(const char *program, char *const argv[]) {
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        execvp(program, argv);
+        _exit(127);
+    }
+    int status;
+    if (waitpid(pid, &status, 0) < 0) return -1;
+    return status;
+}
+
 static int append_fragment(char *out, size_t *pos, size_t cap, const char *src) {
     size_t n = strlen(src);
     if (*pos > cap - 1 || n >= cap - *pos) {
@@ -288,8 +300,31 @@ static void replace_operators(char *expr) {
     char tmp[4096] = "";
     size_t t = 0;
     size_t len = strlen(expr);
+    int in_string = 0;
+    char quote = '\0';
 
     for (size_t i = 0; i < len; i++) {
+        if ((expr[i] == '"' || expr[i] == '\'') &&
+            (i == 0 || expr[i - 1] != '\\')) {
+            char one[2] = { expr[i], '\0' };
+            if (!append_fragment(tmp, &t, sizeof(tmp), one)) return;
+            if (!in_string) {
+                in_string = 1;
+                quote = expr[i];
+            } else if (quote == expr[i]) {
+                in_string = 0;
+                quote = '\0';
+            }
+            continue;
+        }
+
+        if (in_string) {
+            char one[2] = { expr[i], '\0' };
+            if (!append_fragment(tmp, &t, sizeof(tmp), one)) return;
+            continue;
+        }
+
+
         if (strncmp(expr + i, " and ", 5) == 0) {
             if (!append_fragment(tmp, &t, sizeof(tmp), " && ")) return; i += 4;
         } else if (strncmp(expr + i, " or ", 4) == 0) {
@@ -1801,10 +1836,11 @@ int main(int argc, char *argv[]) {
         "__attribute__((unused)) static inline void py_dict_init(py_dict_t *d) { memset(d, 0, sizeof(py_dict_t)); }\n"
         "__attribute__((unused)) static inline void py_dict_set_str(py_dict_t *d, const char *k, const char *v) {\n"
         "    for (int i = 0; i < d->count; i++) {\n"
-        "        if (d->entries[i].used && strcmp(d->entries[i].key, k) == 0) { strncpy(d->entries[i].val, v, 255); return; }\n"
+        "        if (d->entries[i].used && strcmp(d->entries[i].key, k) == 0) { snprintf(d->entries[i].val, sizeof(d->entries[i].val), "%s", v); return; }\n"
         "    }\n"
         "    if (d->count < 64) {\n"
-        "        strncpy(d->entries[d->count].key, k, 63); strncpy(d->entries[d->count].val, v, 255);\n"
+        "        snprintf(d->entries[d->count].key, sizeof(d->entries[d->count].key), "%s", k);
+        snprintf(d->entries[d->count].val, sizeof(d->entries[d->count].val), "%s", v);\n"
         "        d->entries[d->count].used = 1; d->count++;\n"
         "    }\n"
         "}\n"
@@ -1831,7 +1867,9 @@ int main(int argc, char *argv[]) {
         "    for (int i = 0; i < d->count; i++) {\n"
         "        if (d->entries[i].used) {\n"
         "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"'%%s'%%s\", d->entries[i].key, (i < d->count - 1) ? \", \" : \"\");\n"
-        "            strcat(k_buf, tmp);\n"
+        "            size_t k_len = strlen(k_buf), tmp_len = strlen(tmp);
+            if (k_len + tmp_len + 1 >= sizeof(k_buf)) return "[dict keys too large]";
+            memcpy(k_buf + k_len, tmp, tmp_len + 1);\n"
         "        }\n"
         "    }\n"
         "    strcat(k_buf, \"]\"); return k_buf;\n"
@@ -1841,7 +1879,9 @@ int main(int argc, char *argv[]) {
         "    for (int i = 0; i < d->count; i++) {\n"
         "        if (d->entries[i].used) {\n"
         "            char tmp[128]; snprintf(tmp, sizeof(tmp), \"%%s%%s\", d->entries[i].val, (i < d->count - 1) ? \", \" : \"\");\n"
-        "            strcat(v_buf, tmp);\n"
+        "            size_t v_len = strlen(v_buf), tmp_len = strlen(tmp);
+            if (v_len + tmp_len + 1 >= sizeof(v_buf)) return "[dict values too large]";
+            memcpy(v_buf + v_len, tmp, tmp_len + 1);\n"
         "        }\n"
         "    }\n"
         "    strcat(v_buf, \"]\"); return v_buf;\n"
@@ -1918,29 +1958,11 @@ int main(int argc, char *argv[]) {
         run_after = 1;
     }
 
-    size_t compile_cmd_len = strlen(tmp_c_path) + strlen(bin_path) + 64;
-    char *compile_cmd = malloc(compile_cmd_len);
-    if (!compile_cmd) {
-        fprintf(stderr, "pythont: falha ao alocar comando de compilacao\n");
-        unlink(tmp_c_path);
-        utilipc_close();
-        return 1;
-    }
-
-    int compile_written = snprintf(compile_cmd, compile_cmd_len,
-        "gcc -Wno-unused-function -Wno-unused-variable -O2 %s -o %s -lm",
-        tmp_c_path, bin_path);
-
-    if (compile_written < 0 || (size_t)compile_written >= compile_cmd_len) {
-        fprintf(stderr, "pythont: comando de compilacao excedeu o buffer\n");
-        free(compile_cmd);
-        unlink(tmp_c_path);
-        utilipc_close();
-        return 1;
-    }
-
-    int comp_res = system(compile_cmd);
-    free(compile_cmd);
+    char *gcc_args[] = {
+        "gcc", "-Wno-unused-function", "-Wno-unused-variable",
+        "-O2", tmp_c_path, "-o", bin_path, "-lm", NULL
+    };
+    int comp_res = run_process("gcc", gcc_args);
     unlink(tmp_c_path);
 
     if (comp_res != 0) {
@@ -1950,11 +1972,12 @@ int main(int argc, char *argv[]) {
     }
 
     if (run_after) {
-        int ret = system(bin_path);
+        char *run_args[] = { bin_path, NULL };
+        int ret = run_process(bin_path, run_args);
         unlink(bin_path);
         utilipc_close();
 
-        if (ret == -1) return 1;
+        if (ret < 0) return 1;
         if (WIFEXITED(ret)) return WEXITSTATUS(ret);
         if (WIFSIGNALED(ret)) return 128 + WTERMSIG(ret);
         return 1;
