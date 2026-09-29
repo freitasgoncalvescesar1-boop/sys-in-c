@@ -438,10 +438,23 @@ typedef enum {
     AST_PASS
 } ast_kind_t;
 
+typedef enum {
+    AST_TYPE_UNKNOWN,
+    AST_TYPE_INT,
+    AST_TYPE_FLOAT,
+    AST_TYPE_STRING,
+    AST_TYPE_BOOL,
+    AST_TYPE_LIST,
+    AST_TYPE_TUPLE,
+    AST_TYPE_DICT,
+    AST_TYPE_NONE
+} ast_value_type_t;
+
 typedef struct ast_node ast_node_t;
 
 struct ast_node {
     ast_kind_t kind;
+    ast_value_type_t value_type;
     char text[LEX_TOKEN_TEXT];
     ast_node_t *left;
     ast_node_t *right;
@@ -483,6 +496,13 @@ static int ast_is_delimiter(const ast_parser_t *parser, const char *delim) {
 
 static int ast_is_keyword(const ast_parser_t *parser, const char *word) {
     return parser->current.type == TOK_KEYWORD && strcmp(parser->current.text, word) == 0;
+}
+
+static void ast_skip_separators(ast_parser_t *parser) {
+    while (!parser->error &&
+           (parser->current.type == TOK_NEWLINE || ast_is_delimiter(parser, ";"))) {
+        ast_next(parser);
+    }
 }
 
 static int ast_precedence(const token_t *token) {
@@ -900,7 +920,7 @@ static ast_node_t *ast_parse_program(const char *source, ast_parser_t *parser) {
     ast_node_t *program = ast_new(AST_PROGRAM, "program");
     if (!program) return NULL;
     ast_node_t **tail = &program->next;
-    ast_skip_newlines(parser);
+    ast_skip_separators(parser);
     while (!parser->error && parser->current.type != TOK_EOF) {
         if (parser->current.type == TOK_INDENT || parser->current.type == TOK_DEDENT) {
             parser->error = 1;
@@ -910,8 +930,11 @@ static ast_node_t *ast_parse_program(const char *source, ast_parser_t *parser) {
         if (!stmt) break;
         *tail = stmt;
         tail = &stmt->next;
-        if (parser->current.type == TOK_NEWLINE) ast_skip_newlines(parser);
-        else if (parser->current.type != TOK_EOF && !ast_is_compound_statement(stmt)) { parser->error = 1; break; }
+        if (parser->current.type == TOK_NEWLINE || ast_is_delimiter(parser, ";")) {
+            ast_skip_separators(parser);
+        } else if (parser->current.type != TOK_EOF && !ast_is_compound_statement(stmt)) {
+            parser->error = 1; break;
+        }
     }
     return program;
 }
@@ -946,11 +969,105 @@ static const char *ast_kind_name(ast_kind_t kind) {
     }
 }
 
+static const char *ast_type_name(ast_value_type_t type) {
+    switch (type) {
+        case AST_TYPE_INT: return "int";
+        case AST_TYPE_FLOAT: return "float";
+        case AST_TYPE_STRING: return "str";
+        case AST_TYPE_BOOL: return "bool";
+        case AST_TYPE_LIST: return "list";
+        case AST_TYPE_TUPLE: return "tuple";
+        case AST_TYPE_DICT: return "dict";
+        case AST_TYPE_NONE: return "none";
+        default: return "unknown";
+    }
+}
+
+static ast_value_type_t ast_infer_type(ast_node_t *node) {
+    if (!node) return AST_TYPE_UNKNOWN;
+    switch (node->kind) {
+        case AST_NUMBER:
+            node->value_type = strchr(node->text, '.') ? AST_TYPE_FLOAT : AST_TYPE_INT;
+            break;
+        case AST_STRING:
+            node->value_type = AST_TYPE_STRING;
+            break;
+        case AST_IDENTIFIER:
+            if (!strcmp(node->text, "True") || !strcmp(node->text, "False")) node->value_type = AST_TYPE_BOOL;
+            else if (!strcmp(node->text, "None")) node->value_type = AST_TYPE_NONE;
+            else node->value_type = AST_TYPE_UNKNOWN;
+            break;
+        case AST_LIST: node->value_type = AST_TYPE_LIST; break;
+        case AST_TUPLE: node->value_type = AST_TYPE_TUPLE; break;
+        case AST_DICT: node->value_type = AST_TYPE_DICT; break;
+        case AST_UNARY:
+            node->value_type = ast_infer_type(node->left);
+            if (!strcmp(node->text, "not")) node->value_type = AST_TYPE_BOOL;
+            break;
+        case AST_BINARY: {
+            ast_value_type_t l = ast_infer_type(node->left);
+            ast_value_type_t r = ast_infer_type(node->right);
+            if (!strcmp(node->text, "==") || !strcmp(node->text, "!=") ||
+                !strcmp(node->text, "<") || !strcmp(node->text, "<=") ||
+                !strcmp(node->text, ">") || !strcmp(node->text, ">=") ||
+                !strcmp(node->text, "and") || !strcmp(node->text, "or") ||
+                !strcmp(node->text, "in") || !strcmp(node->text, "is")) node->value_type = AST_TYPE_BOOL;
+            else if (l == AST_TYPE_FLOAT || r == AST_TYPE_FLOAT) node->value_type = AST_TYPE_FLOAT;
+            else if (l == AST_TYPE_INT && r == AST_TYPE_INT) node->value_type = AST_TYPE_INT;
+            else node->value_type = AST_TYPE_UNKNOWN;
+            break;
+        }
+        case AST_ASSIGN:
+            ast_infer_type(node->left);
+            node->value_type = ast_infer_type(node->right);
+            break;
+        case AST_EXPR_STMT:
+        case AST_RETURN:
+            node->value_type = ast_infer_type(node->left);
+            break;
+        case AST_IF:
+        case AST_WHILE:
+        case AST_FOR:
+            ast_infer_type(node->left);
+            ast_infer_type(node->right);
+            node->value_type = AST_TYPE_UNKNOWN;
+            break;
+        case AST_CALL:
+            ast_infer_type(node->callee);
+            for (size_t i = 0; i < node->arg_count; ++i) ast_infer_type(node->args[i]);
+            node->value_type = AST_TYPE_UNKNOWN;
+            break;
+        case AST_INDEX:
+        case AST_SLICE:
+        case AST_MEMBER:
+            ast_infer_type(node->left);
+            ast_infer_type(node->right);
+            node->value_type = AST_TYPE_UNKNOWN;
+            break;
+        case AST_FUNCTION:
+        case AST_BLOCK:
+        case AST_PROGRAM:
+            for (ast_node_t *n = node->next; n; n = n->next) ast_infer_type(n);
+            ast_infer_type(node->body);
+            node->value_type = AST_TYPE_UNKNOWN;
+            break;
+        default:
+            node->value_type = AST_TYPE_UNKNOWN;
+            break;
+    }
+    return node->value_type;
+}
+
+static void ast_infer_program(ast_node_t *program) {
+    for (ast_node_t *n = program ? program->next : NULL; n; n = n->next) ast_infer_type(n);
+}
+
 static void ast_dump_node(const ast_node_t *node, int depth) {
     if (!node) return;
     for (int i = 0; i < depth; ++i) printf("  ");
     printf("%s", ast_kind_name(node->kind));
     if (node->text[0]) printf(": %s", node->text);
+    if (node->value_type != AST_TYPE_UNKNOWN) printf(" <%s>", ast_type_name(node->value_type));
     printf("\n");
 
     if (node->kind == AST_PROGRAM || node->kind == AST_BLOCK) {
@@ -993,6 +1110,7 @@ static int ast_dump_source(const char *source) {
                 parser.current.line, parser.current.column, parser.current.text);
         return 1;
     }
+    ast_infer_program(program);
     ast_dump_node(program, 0);
     return 0;
 }
@@ -1251,6 +1369,7 @@ static int ast_compile_source(const char *source, char **out_code) {
                 parser.current.line, parser.current.column, parser.current.text);
         return 1;
     }
+    ast_infer_program(program);
     /* Never emit C that is known to be invalid. Dynamic objects such as
      * lists/dicts/indexing still belong to the mature legacy backend until
      * their native lowering is implemented. */
