@@ -8,7 +8,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <sys/wait.h>
-#include "../libutilipc/utilipc.h"
 
 #define MAX_CODE_SZ   (1024 * 1024)
 #define MAX_VARS      512
@@ -2510,19 +2509,16 @@ static void run_interactive_repl(void) {
 }
 
 int main(int argc, char *argv[]) {
-    utilipc_init();
 
     if (argc < 2) {
         if (isatty(STDIN_FILENO)) {
             run_interactive_repl();
-            utilipc_close();
             return 0;
         }
     }
 
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
-        utilipc_close();
         return 0;
     }
 
@@ -2551,26 +2547,22 @@ int main(int argc, char *argv[]) {
             if (!fp) {
                 fprintf(stderr, "pythont: erro ao abrir '%s': %s\\n",
                         py_file, strerror(errno));
-                utilipc_close();
                 return 1;
             }
             if (fseek(fp, 0, SEEK_END) != 0) {
                 fclose(fp);
-                utilipc_close();
                 return 1;
             }
             long size = ftell(fp);
             if (size < 0 || (size_t)size >= MAX_CODE_SZ) {
                 fclose(fp);
                 fprintf(stderr, "pythont: arquivo grande demais para AST\\n");
-                utilipc_close();
                 return 1;
             }
             rewind(fp);
             source_copy = malloc((size_t)size + 1);
             if (!source_copy) {
                 fclose(fp);
-                utilipc_close();
                 return 1;
             }
             size_t read_size = fread(source_copy, 1, (size_t)size, fp);
@@ -2581,7 +2573,6 @@ int main(int argc, char *argv[]) {
 
         int ast_result = ast_dump_source(source ? source : "");
         free(source_copy);
-        utilipc_close();
         return ast_result;
     }
 
@@ -2593,13 +2584,11 @@ int main(int argc, char *argv[]) {
             if (!fp) {
                 fprintf(stderr, "pythont: erro ao abrir '%s': %s\\n",
                         py_file, strerror(errno));
-                utilipc_close();
                 return 1;
             }
 
             if (fseek(fp, 0, SEEK_END) != 0) {
                 fclose(fp);
-                utilipc_close();
                 return 1;
             }
 
@@ -2607,7 +2596,6 @@ int main(int argc, char *argv[]) {
             if (size < 0 || (size_t)size >= MAX_CODE_SZ) {
                 fclose(fp);
                 fprintf(stderr, "pythont: arquivo grande demais para tokenizacao\\n");
-                utilipc_close();
                 return 1;
             }
 
@@ -2616,7 +2604,6 @@ int main(int argc, char *argv[]) {
             if (!source_copy) {
                 fclose(fp);
                 fprintf(stderr, "pythont: memoria insuficiente para tokenizacao\\n");
-                utilipc_close();
                 return 1;
             }
 
@@ -2629,7 +2616,6 @@ int main(int argc, char *argv[]) {
             lexer_dump(source ? source : "");
         }
 
-        utilipc_close();
         return 0;
     }
 
@@ -2646,7 +2632,6 @@ int main(int argc, char *argv[]) {
         FILE *fp = fopen(py_file, "r");
         if (!fp) {
             fprintf(stderr, "pythont: erro ao abrir '%s': %s\n", py_file, strerror(errno));
-            utilipc_close();
             return 1;
         }
 
@@ -2688,18 +2673,15 @@ int main(int argc, char *argv[]) {
             if (needed > sizeof(accum)) {
                 fprintf(stderr, "pythont: logical Python line exceeds 4095 characters\n");
                 fclose(fp);
-                utilipc_close();
                 return 1;
             }
             size_t accum_pos = strlen(accum);
             if (accum[0] != '\0' && !append_fragment(accum, &accum_pos, sizeof(accum), " ")) {
                 fclose(fp);
-                utilipc_close();
                 return 1;
             }
             if (!append_fragment(accum, &accum_pos, sizeof(accum), trimmed)) {
                 fclose(fp);
-                utilipc_close();
                 return 1;
             }
 
@@ -2712,7 +2694,6 @@ int main(int argc, char *argv[]) {
         fclose(fp);
     } else {
         print_help();
-        utilipc_close();
         return 1;
     }
 
@@ -2750,7 +2731,6 @@ int main(int argc, char *argv[]) {
                                "    %s %s = {0};\n", symbols[i].class_type, symbols[i].name);
 
         if (!ok) {
-            utilipc_close();
             return 1;
         }
     }
@@ -3025,13 +3005,11 @@ int main(int argc, char *argv[]) {
         "    return 0;\n"
         "}\n",
         class_struct_buffer, func_buffer, var_decl_buf, main_buffer)) {
-        utilipc_close();
         return 1;
     }
 
     if (emit_c_only) {
         printf("%s\n", final_c_code);
-        utilipc_close();
         return 0;
     }
 
@@ -3041,7 +3019,6 @@ int main(int argc, char *argv[]) {
         "%s/pythont_%d.c", tmp_dir, getpid());
     if (tmp_path_written < 0 || (size_t)tmp_path_written >= sizeof(tmp_c_path)) {
         fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
-        utilipc_close();
         return 1;
     }
 
@@ -3051,14 +3028,12 @@ int main(int argc, char *argv[]) {
             "pythont_%d.c", getpid());
         if (fallback_written < 0 || (size_t)fallback_written >= sizeof(tmp_c_path)) {
             fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
-            utilipc_close();
             return 1;
         }
         c_fp = fopen(tmp_c_path, "w");
     }
     if (!c_fp) {
         fprintf(stderr, "pythont: falha ao criar arquivo C temporario\n");
-        utilipc_close();
         return 1;
     }
     fputs(final_c_code, c_fp);
@@ -3072,7 +3047,6 @@ int main(int argc, char *argv[]) {
         if (out_bin_len >= sizeof(bin_path)) {
             fprintf(stderr, "pythont: caminho do binario excede o limite\n");
             unlink(tmp_c_path);
-            utilipc_close();
             return 1;
         }
         memcpy(bin_path, out_bin, out_bin_len + 1);
@@ -3082,7 +3056,6 @@ int main(int argc, char *argv[]) {
         if (bin_path_written < 0 || (size_t)bin_path_written >= sizeof(bin_path)) {
             fprintf(stderr, "pythont: caminho do binario excede o limite\n");
             unlink(tmp_c_path);
-            utilipc_close();
             return 1;
         }
         run_after = 1;
@@ -3097,7 +3070,6 @@ int main(int argc, char *argv[]) {
 
     if (comp_res != 0) {
         fprintf(stderr, "pythont: erro de compilacao do codigo C gerado\n");
-        utilipc_close();
         return 1;
     }
 
@@ -3105,7 +3077,6 @@ int main(int argc, char *argv[]) {
         char *run_args[] = { bin_path, NULL };
         int ret = run_process(bin_path, run_args);
         unlink(bin_path);
-        utilipc_close();
 
         if (ret < 0) return 1;
         if (WIFEXITED(ret)) return WEXITSTATUS(ret);
@@ -3115,6 +3086,5 @@ int main(int argc, char *argv[]) {
         printf("  \033[1;32m[✔ SUCESSO]\033[0m Binario nativo C gerado em: \033[1;36m%s\033[0m\n", bin_path);
     }
 
-    utilipc_close();
     return 0;
 }
