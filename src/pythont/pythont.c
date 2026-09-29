@@ -408,8 +408,8 @@ static const char *token_type_name(token_type_t type) {
  * is deliberately independent so the frontend can migrate statement by
  * statement without breaking existing programs.
  */
-#define AST_MAX_NODES 4096
-#define AST_MAX_ARGS 16
+#define AST_MAX_NODES 8192
+#define AST_MAX_ARGS 32
 
 typedef enum {
     AST_NUMBER,
@@ -424,7 +424,18 @@ typedef enum {
     AST_INDEX,
     AST_SLICE,
     AST_MEMBER,
-    AST_ASSIGN
+    AST_ASSIGN,
+    AST_PROGRAM,
+    AST_BLOCK,
+    AST_EXPR_STMT,
+    AST_IF,
+    AST_WHILE,
+    AST_FOR,
+    AST_FUNCTION,
+    AST_RETURN,
+    AST_BREAK,
+    AST_CONTINUE,
+    AST_PASS
 } ast_kind_t;
 
 typedef struct ast_node ast_node_t;
@@ -435,6 +446,9 @@ struct ast_node {
     ast_node_t *left;
     ast_node_t *right;
     ast_node_t *callee;
+    ast_node_t *body;
+    ast_node_t *else_body;
+    ast_node_t *next;
     ast_node_t *args[AST_MAX_ARGS];
     size_t arg_count;
 };
@@ -467,6 +481,10 @@ static int ast_is_delimiter(const ast_parser_t *parser, const char *delim) {
            strcmp(parser->current.text, delim) == 0;
 }
 
+static int ast_is_keyword(const ast_parser_t *parser, const char *word) {
+    return parser->current.type == TOK_KEYWORD && strcmp(parser->current.text, word) == 0;
+}
+
 static int ast_precedence(const token_t *token) {
     if (token->type != TOK_OPERATOR && token->type != TOK_KEYWORD) return -1;
     if (!strcmp(token->text, "or")) return 1;
@@ -483,6 +501,13 @@ static int ast_precedence(const token_t *token) {
 }
 
 static ast_node_t *ast_parse_expression(ast_parser_t *parser, int min_prec);
+static ast_node_t *ast_parse_statement(ast_parser_t *parser);
+
+static int ast_is_compound_statement(const ast_node_t *node);
+
+static void ast_skip_newlines(ast_parser_t *parser) {
+    while (!parser->error && parser->current.type == TOK_NEWLINE) ast_next(parser);
+}
 
 static ast_node_t *ast_parse_primary(ast_parser_t *parser) {
     token_t token = parser->current;
@@ -499,9 +524,8 @@ static ast_node_t *ast_parse_primary(ast_parser_t *parser) {
 
     if (token.type == TOK_IDENTIFIER ||
         (token.type == TOK_KEYWORD &&
-         (strcmp(token.text, "True") == 0 ||
-          strcmp(token.text, "False") == 0 ||
-          strcmp(token.text, "None") == 0))) {
+         (!strcmp(token.text, "True") || !strcmp(token.text, "False") ||
+          !strcmp(token.text, "None")))) {
         ast_next(parser);
         return ast_new(AST_IDENTIFIER, token.text);
     }
@@ -510,30 +534,18 @@ static ast_node_t *ast_parse_primary(ast_parser_t *parser) {
         ast_node_t *list = ast_new(AST_LIST, "list");
         if (!list) return NULL;
         ast_next(parser);
-
         if (!ast_is_delimiter(parser, "]")) {
             while (!parser->error) {
-                if (list->arg_count >= AST_MAX_ARGS) {
-                    parser->error = 1;
-                    return NULL;
-                }
+                if (list->arg_count >= AST_MAX_ARGS) { parser->error = 1; return NULL; }
                 ast_node_t *item = ast_parse_expression(parser, 0);
                 if (!item) return NULL;
                 list->args[list->arg_count++] = item;
-
-                if (ast_is_delimiter(parser, ",")) {
-                    ast_next(parser);
-                    if (ast_is_delimiter(parser, "]")) break;
-                    continue;
-                }
-                break;
+                if (!ast_is_delimiter(parser, ",")) break;
+                ast_next(parser);
+                if (ast_is_delimiter(parser, "]")) break;
             }
         }
-
-        if (!ast_is_delimiter(parser, "]")) {
-            parser->error = 1;
-            return NULL;
-        }
+        if (!ast_is_delimiter(parser, "]")) { parser->error = 1; return NULL; }
         ast_next(parser);
         return list;
     }
@@ -542,98 +554,61 @@ static ast_node_t *ast_parse_primary(ast_parser_t *parser) {
         ast_node_t *dict = ast_new(AST_DICT, "dict");
         if (!dict) return NULL;
         ast_next(parser);
-
         if (!ast_is_delimiter(parser, "}")) {
             while (!parser->error) {
-                if (dict->arg_count + 1 >= AST_MAX_ARGS) {
-                    parser->error = 1;
-                    return NULL;
-                }
-
+                if (dict->arg_count + 1 >= AST_MAX_ARGS) { parser->error = 1; return NULL; }
                 ast_node_t *key = ast_parse_expression(parser, 0);
-                if (!key) return NULL;
-
-                if (!ast_is_delimiter(parser, ":")) {
-                    parser->error = 1;
-                    return NULL;
-                }
+                if (!key || !ast_is_delimiter(parser, ":")) { parser->error = 1; return NULL; }
                 ast_next(parser);
-
                 ast_node_t *value = ast_parse_expression(parser, 0);
                 if (!value) return NULL;
-
                 dict->args[dict->arg_count++] = key;
                 dict->args[dict->arg_count++] = value;
-
-                if (ast_is_delimiter(parser, ",")) {
-                    ast_next(parser);
-                    if (ast_is_delimiter(parser, "}")) break;
-                    continue;
-                }
-                break;
+                if (!ast_is_delimiter(parser, ",")) break;
+                ast_next(parser);
+                if (ast_is_delimiter(parser, "}")) break;
             }
         }
-
-        if (!ast_is_delimiter(parser, "}")) {
-            parser->error = 1;
-            return NULL;
-        }
+        if (!ast_is_delimiter(parser, "}")) { parser->error = 1; return NULL; }
         ast_next(parser);
         return dict;
     }
 
     if (ast_is_delimiter(parser, "(")) {
         ast_next(parser);
-
         if (ast_is_delimiter(parser, ")")) {
             ast_node_t *tuple = ast_new(AST_TUPLE, "tuple");
             if (!tuple) return NULL;
             ast_next(parser);
             return tuple;
         }
-
         ast_node_t *first = ast_parse_expression(parser, 0);
         if (!first) return NULL;
-
         if (!ast_is_delimiter(parser, ",")) {
-            if (!ast_is_delimiter(parser, ")")) {
-                parser->error = 1;
-                return NULL;
-            }
+            if (!ast_is_delimiter(parser, ")")) { parser->error = 1; return NULL; }
             ast_next(parser);
             return first;
         }
-
         ast_node_t *tuple = ast_new(AST_TUPLE, "tuple");
         if (!tuple) return NULL;
         tuple->args[tuple->arg_count++] = first;
-
         while (ast_is_delimiter(parser, ",")) {
             ast_next(parser);
             if (ast_is_delimiter(parser, ")")) break;
-            if (tuple->arg_count >= AST_MAX_ARGS) {
-                parser->error = 1;
-                return NULL;
-            }
+            if (tuple->arg_count >= AST_MAX_ARGS) { parser->error = 1; return NULL; }
             ast_node_t *item = ast_parse_expression(parser, 0);
             if (!item) return NULL;
             tuple->args[tuple->arg_count++] = item;
         }
-
-        if (!ast_is_delimiter(parser, ")")) {
-            parser->error = 1;
-            return NULL;
-        }
+        if (!ast_is_delimiter(parser, ")")) { parser->error = 1; return NULL; }
         ast_next(parser);
         return tuple;
     }
 
     if ((parser->current.type == TOK_OPERATOR &&
-         (!strcmp(parser->current.text, "+") ||
-          !strcmp(parser->current.text, "-") ||
+         (!strcmp(parser->current.text, "+") || !strcmp(parser->current.text, "-") ||
           !strcmp(parser->current.text, "~"))) ||
-        (parser->current.type == TOK_KEYWORD &&
-         strcmp(parser->current.text, "not") == 0)) {
+        ast_is_keyword(parser, "not")) {
         char op[LEX_TOKEN_TEXT];
         snprintf(op, sizeof(op), "%s", parser->current.text);
         ast_next(parser);
@@ -659,30 +634,18 @@ static ast_node_t *ast_parse_postfix(ast_parser_t *parser) {
             if (!call) return NULL;
             call->callee = node;
             ast_next(parser);
-
             if (!ast_is_delimiter(parser, ")")) {
                 while (!parser->error) {
-                    if (call->arg_count >= AST_MAX_ARGS) {
-                        parser->error = 1;
-                        return NULL;
-                    }
+                    if (call->arg_count >= AST_MAX_ARGS) { parser->error = 1; return NULL; }
                     ast_node_t *arg = ast_parse_expression(parser, 0);
                     if (!arg) return NULL;
                     call->args[call->arg_count++] = arg;
-
-                    if (ast_is_delimiter(parser, ",")) {
-                        ast_next(parser);
-                        if (ast_is_delimiter(parser, ")")) break;
-                        continue;
-                    }
-                    break;
+                    if (!ast_is_delimiter(parser, ",")) break;
+                    ast_next(parser);
+                    if (ast_is_delimiter(parser, ")")) break;
                 }
             }
-
-            if (!ast_is_delimiter(parser, ")")) {
-                parser->error = 1;
-                return NULL;
-            }
+            if (!ast_is_delimiter(parser, ")")) { parser->error = 1; return NULL; }
             ast_next(parser);
             node = call;
             continue;
@@ -690,26 +653,22 @@ static ast_node_t *ast_parse_postfix(ast_parser_t *parser) {
 
         if (ast_is_delimiter(parser, "[")) {
             ast_next(parser);
-
             ast_node_t *start = NULL;
             if (!ast_is_delimiter(parser, ":")) {
                 start = ast_parse_expression(parser, 0);
                 if (!start) return NULL;
             }
-
             if (ast_is_delimiter(parser, ":")) {
                 ast_node_t *slice = ast_new(AST_SLICE, ":");
                 if (!slice) return NULL;
                 slice->args[0] = start;
                 slice->arg_count = 1;
                 ast_next(parser);
-
                 if (!ast_is_delimiter(parser, ":") && !ast_is_delimiter(parser, "]")) {
                     slice->args[1] = ast_parse_expression(parser, 0);
                     if (!slice->args[1]) return NULL;
                     slice->arg_count = 2;
                 }
-
                 if (ast_is_delimiter(parser, ":")) {
                     ast_next(parser);
                     if (!ast_is_delimiter(parser, "]")) {
@@ -718,23 +677,14 @@ static ast_node_t *ast_parse_postfix(ast_parser_t *parser) {
                         slice->arg_count = 3;
                     }
                 }
-
-                if (!ast_is_delimiter(parser, "]")) {
-                    parser->error = 1;
-                    return NULL;
-                }
+                if (!ast_is_delimiter(parser, "]")) { parser->error = 1; return NULL; }
                 ast_next(parser);
                 slice->left = node;
                 node = slice;
                 continue;
             }
-
-            if (!start || !ast_is_delimiter(parser, "]")) {
-                parser->error = 1;
-                return NULL;
-            }
+            if (!start || !ast_is_delimiter(parser, "]")) { parser->error = 1; return NULL; }
             ast_next(parser);
-
             ast_node_t *indexed = ast_new(AST_INDEX, "[]");
             if (!indexed) return NULL;
             indexed->left = node;
@@ -745,11 +695,7 @@ static ast_node_t *ast_parse_postfix(ast_parser_t *parser) {
 
         if (ast_is_delimiter(parser, ".")) {
             ast_next(parser);
-            if (parser->current.type != TOK_IDENTIFIER) {
-                parser->error = 1;
-                return NULL;
-            }
-
+            if (parser->current.type != TOK_IDENTIFIER) { parser->error = 1; return NULL; }
             ast_node_t *member = ast_new(AST_MEMBER, parser->current.text);
             if (!member) return NULL;
             member->left = node;
@@ -757,43 +703,35 @@ static ast_node_t *ast_parse_postfix(ast_parser_t *parser) {
             node = member;
             continue;
         }
-
         break;
     }
-
     return node;
 }
 
 static ast_node_t *ast_parse_expression(ast_parser_t *parser, int min_prec) {
     ast_node_t *left = ast_parse_postfix(parser);
     if (!left) return NULL;
-
     while (!parser->error) {
         int prec = ast_precedence(&parser->current);
         if (prec < min_prec) break;
-
         char op[LEX_TOKEN_TEXT];
         snprintf(op, sizeof(op), "%s", parser->current.text);
         ast_next(parser);
-
         int next_min = prec + (strcmp(op, "**") != 0);
         ast_node_t *right = ast_parse_expression(parser, next_min);
         if (!right) return NULL;
-
         ast_node_t *node = ast_new(AST_BINARY, op);
         if (!node) return NULL;
         node->left = left;
         node->right = right;
         left = node;
     }
-
     return left;
 }
 
-static ast_node_t *ast_parse_statement(ast_parser_t *parser) {
+static ast_node_t *ast_parse_assignment_or_expr(ast_parser_t *parser) {
     ast_node_t *left = ast_parse_expression(parser, 0);
     if (!left) return NULL;
-
     if (parser->current.type == TOK_OPERATOR) {
         const char *op = parser->current.text;
         int is_assignment = !strcmp(op, "=") || !strcmp(op, "+=") ||
@@ -803,19 +741,14 @@ static ast_node_t *ast_parse_statement(ast_parser_t *parser) {
                             !strcmp(op, "&=") || !strcmp(op, "|=") ||
                             !strcmp(op, "^=") || !strcmp(op, "<<=") ||
                             !strcmp(op, ">>=");
-        int valid_target = left->kind == AST_IDENTIFIER ||
-                           left->kind == AST_MEMBER || left->kind == AST_INDEX;
+        int valid_target = left->kind == AST_IDENTIFIER || left->kind == AST_MEMBER || left->kind == AST_INDEX;
         if (is_assignment) {
-            if (!valid_target) {
-                parser->error = 1;
-                return NULL;
-            }
+            if (!valid_target) { parser->error = 1; return NULL; }
             char assign_op[LEX_TOKEN_TEXT];
             snprintf(assign_op, sizeof(assign_op), "%s", op);
             ast_next(parser);
             ast_node_t *value = ast_parse_expression(parser, 0);
             if (!value) return NULL;
-
             ast_node_t *assign = ast_new(AST_ASSIGN, assign_op);
             if (!assign) return NULL;
             assign->left = left;
@@ -823,8 +756,164 @@ static ast_node_t *ast_parse_statement(ast_parser_t *parser) {
             return assign;
         }
     }
-
     return left;
+}
+
+static int ast_expect_colon_newline_indent(ast_parser_t *parser) {
+    if (!ast_is_delimiter(parser, ":")) { parser->error = 1; return 0; }
+    ast_next(parser);
+    if (parser->current.type != TOK_NEWLINE) { parser->error = 1; return 0; }
+    ast_next(parser);
+    if (parser->current.type != TOK_INDENT) { parser->error = 1; return 0; }
+    ast_next(parser);
+    return 1;
+}
+
+static ast_node_t *ast_parse_block(ast_parser_t *parser) {
+    ast_node_t *block = ast_new(AST_BLOCK, "block");
+    if (!block) return NULL;
+    ast_node_t **tail = &block->next;
+    ast_skip_newlines(parser);
+    while (!parser->error && parser->current.type != TOK_DEDENT && parser->current.type != TOK_EOF) {
+        ast_node_t *stmt = ast_parse_statement(parser);
+        if (!stmt) return NULL;
+        *tail = stmt;
+        tail = &stmt->next;
+        if (parser->current.type == TOK_NEWLINE) ast_skip_newlines(parser);
+        else if (parser->current.type != TOK_DEDENT && parser->current.type != TOK_EOF && !ast_is_compound_statement(stmt)) {
+            parser->error = 1;
+            return NULL;
+        }
+    }
+    if (parser->current.type != TOK_DEDENT) { parser->error = 1; return NULL; }
+    ast_next(parser);
+    return block;
+}
+
+static ast_node_t *ast_parse_suite(ast_parser_t *parser) {
+    if (!ast_expect_colon_newline_indent(parser)) return NULL;
+    return ast_parse_block(parser);
+}
+
+static int ast_is_compound_statement(const ast_node_t *node) {
+    return node && (node->kind == AST_IF || node->kind == AST_WHILE ||
+                    node->kind == AST_FOR || node->kind == AST_FUNCTION);
+}
+
+static ast_node_t *ast_parse_statement(ast_parser_t *parser) {
+    if (ast_is_keyword(parser, "if") || ast_is_keyword(parser, "elif")) {
+        ast_next(parser);
+        ast_node_t *node = ast_new(AST_IF, "if");
+        if (!node) return NULL;
+        node->left = ast_parse_expression(parser, 0);
+        if (!node->left) return NULL;
+        node->body = ast_parse_suite(parser);
+        if (!node->body) return NULL;
+        if (ast_is_keyword(parser, "elif")) {
+            ast_node_t *elif = ast_parse_statement(parser);
+            if (!elif) return NULL;
+            node->else_body = ast_new(AST_BLOCK, "block");
+            if (!node->else_body) return NULL;
+            node->else_body->next = elif;
+        } else if (ast_is_keyword(parser, "else")) {
+            ast_next(parser);
+            node->else_body = ast_parse_suite(parser);
+            if (!node->else_body) return NULL;
+        }
+        return node;
+    }
+
+    if (ast_is_keyword(parser, "while")) {
+        ast_next(parser);
+        ast_node_t *node = ast_new(AST_WHILE, "while");
+        if (!node) return NULL;
+        node->left = ast_parse_expression(parser, 0);
+        if (!node->left) return NULL;
+        node->body = ast_parse_suite(parser);
+        return node;
+    }
+
+    if (ast_is_keyword(parser, "for")) {
+        ast_next(parser);
+        if (parser->current.type != TOK_IDENTIFIER) { parser->error = 1; return NULL; }
+        ast_node_t *node = ast_new(AST_FOR, "for");
+        if (!node) return NULL;
+        node->left = ast_new(AST_IDENTIFIER, parser->current.text);
+        if (!node->left) return NULL;
+        ast_next(parser);
+        if (!ast_is_keyword(parser, "in")) { parser->error = 1; return NULL; }
+        ast_next(parser);
+        node->right = ast_parse_expression(parser, 0);
+        if (!node->right) return NULL;
+        node->body = ast_parse_suite(parser);
+        return node;
+    }
+
+    if (ast_is_keyword(parser, "def")) {
+        ast_next(parser);
+        if (parser->current.type != TOK_IDENTIFIER) { parser->error = 1; return NULL; }
+        ast_node_t *node = ast_new(AST_FUNCTION, parser->current.text);
+        if (!node) return NULL;
+        ast_next(parser);
+        if (!ast_is_delimiter(parser, "(")) { parser->error = 1; return NULL; }
+        ast_next(parser);
+        while (!parser->error && !ast_is_delimiter(parser, ")")) {
+            if (node->arg_count >= AST_MAX_ARGS || parser->current.type != TOK_IDENTIFIER) { parser->error = 1; return NULL; }
+            node->args[node->arg_count++] = ast_new(AST_IDENTIFIER, parser->current.text);
+            if (!node->args[node->arg_count - 1]) return NULL;
+            ast_next(parser);
+            if (ast_is_delimiter(parser, ",")) ast_next(parser);
+            else if (!ast_is_delimiter(parser, ")")) { parser->error = 1; return NULL; }
+        }
+        if (!ast_is_delimiter(parser, ")")) { parser->error = 1; return NULL; }
+        ast_next(parser);
+        node->body = ast_parse_suite(parser);
+        return node;
+    }
+
+    if (ast_is_keyword(parser, "return")) {
+        ast_next(parser);
+        ast_node_t *node = ast_new(AST_RETURN, "return");
+        if (!node) return NULL;
+        if (parser->current.type != TOK_NEWLINE && parser->current.type != TOK_DEDENT && parser->current.type != TOK_EOF)
+            node->left = ast_parse_expression(parser, 0);
+        return node;
+    }
+
+    if (ast_is_keyword(parser, "break")) { ast_next(parser); return ast_new(AST_BREAK, "break"); }
+    if (ast_is_keyword(parser, "continue")) { ast_next(parser); return ast_new(AST_CONTINUE, "continue"); }
+    if (ast_is_keyword(parser, "pass")) { ast_next(parser); return ast_new(AST_PASS, "pass"); }
+
+    ast_node_t *expr = ast_parse_assignment_or_expr(parser);
+    if (!expr) return NULL;
+    ast_node_t *stmt = ast_new(AST_EXPR_STMT, "expr");
+    if (!stmt) return NULL;
+    stmt->left = expr;
+    return stmt;
+}
+
+static ast_node_t *ast_parse_program(const char *source, ast_parser_t *parser) {
+    memset(parser, 0, sizeof(*parser));
+    lexer_init(&parser->lexer, source);
+    ast_node_count = 0;
+    ast_next(parser);
+    ast_node_t *program = ast_new(AST_PROGRAM, "program");
+    if (!program) return NULL;
+    ast_node_t **tail = &program->next;
+    ast_skip_newlines(parser);
+    while (!parser->error && parser->current.type != TOK_EOF) {
+        if (parser->current.type == TOK_INDENT || parser->current.type == TOK_DEDENT) {
+            parser->error = 1;
+            break;
+        }
+        ast_node_t *stmt = ast_parse_statement(parser);
+        if (!stmt) break;
+        *tail = stmt;
+        tail = &stmt->next;
+        if (parser->current.type == TOK_NEWLINE) ast_skip_newlines(parser);
+        else if (parser->current.type != TOK_EOF && !ast_is_compound_statement(stmt)) { parser->error = 1; break; }
+    }
+    return program;
 }
 
 static const char *ast_kind_name(ast_kind_t kind) {
@@ -842,6 +931,17 @@ static const char *ast_kind_name(ast_kind_t kind) {
         case AST_SLICE: return "Slice";
         case AST_MEMBER: return "Member";
         case AST_ASSIGN: return "Assign";
+        case AST_PROGRAM: return "Program";
+        case AST_BLOCK: return "Block";
+        case AST_EXPR_STMT: return "ExprStmt";
+        case AST_IF: return "If";
+        case AST_WHILE: return "While";
+        case AST_FOR: return "For";
+        case AST_FUNCTION: return "Function";
+        case AST_RETURN: return "Return";
+        case AST_BREAK: return "Break";
+        case AST_CONTINUE: return "Continue";
+        case AST_PASS: return "Pass";
         default: return "Unknown";
     }
 }
@@ -849,63 +949,252 @@ static const char *ast_kind_name(ast_kind_t kind) {
 static void ast_dump_node(const ast_node_t *node, int depth) {
     if (!node) return;
     for (int i = 0; i < depth; ++i) printf("  ");
-
     printf("%s", ast_kind_name(node->kind));
     if (node->text[0]) printf(": %s", node->text);
     printf("\n");
 
+    if (node->kind == AST_PROGRAM || node->kind == AST_BLOCK) {
+        for (const ast_node_t *n = node->next; n; n = n->next) ast_dump_node(n, depth + 1);
+        return;
+    }
+    if (node->kind == AST_FUNCTION) {
+        for (size_t i = 0; i < node->arg_count; ++i) ast_dump_node(node->args[i], depth + 1);
+        ast_dump_node(node->body, depth + 1);
+        return;
+    }
+    if (node->kind == AST_IF || node->kind == AST_WHILE || node->kind == AST_FOR) {
+        ast_dump_node(node->left, depth + 1);
+        if (node->right) ast_dump_node(node->right, depth + 1);
+        ast_dump_node(node->body, depth + 1);
+        ast_dump_node(node->else_body, depth + 1);
+        return;
+    }
+    if (node->kind == AST_EXPR_STMT || node->kind == AST_RETURN || node->kind == AST_UNARY ||
+        node->kind == AST_ASSIGN || node->kind == AST_BINARY || node->kind == AST_INDEX || node->kind == AST_SLICE || node->kind == AST_MEMBER) {
+        ast_dump_node(node->left, depth + 1);
+        if (node->right) ast_dump_node(node->right, depth + 1);
+        return;
+    }
     if (node->kind == AST_CALL && node->callee) {
         ast_dump_node(node->callee, depth + 1);
-        for (size_t i = 0; i < node->arg_count; ++i)
-            ast_dump_node(node->args[i], depth + 1);
+        for (size_t i = 0; i < node->arg_count; ++i) ast_dump_node(node->args[i], depth + 1);
         return;
     }
-
-    if (node->kind == AST_DICT) {
-        for (size_t i = 0; i < node->arg_count; ++i)
-            ast_dump_node(node->args[i], depth + 1);
-        return;
+    if (node->kind == AST_LIST || node->kind == AST_TUPLE || node->kind == AST_DICT) {
+        for (size_t i = 0; i < node->arg_count; ++i) ast_dump_node(node->args[i], depth + 1);
     }
-
-    if (node->kind == AST_LIST || node->kind == AST_TUPLE || node->kind == AST_SLICE) {
-        if (node->kind == AST_SLICE && node->left)
-            ast_dump_node(node->left, depth + 1);
-        for (size_t i = 0; i < node->arg_count; ++i)
-            ast_dump_node(node->args[i], depth + 1);
-        return;
-    }
-
-    if (node->left) ast_dump_node(node->left, depth + 1);
-    if (node->right) ast_dump_node(node->right, depth + 1);
 }
 
 static int ast_dump_source(const char *source) {
     ast_parser_t parser;
-    memset(&parser, 0, sizeof(parser));
-    lexer_init(&parser.lexer, source);
-    ast_node_count = 0;
-    ast_next(&parser);
-
-    while (!parser.error && parser.current.type != TOK_EOF) {
-        if (parser.current.type == TOK_NEWLINE ||
-            parser.current.type == TOK_INDENT ||
-            parser.current.type == TOK_DEDENT) {
-            ast_next(&parser);
-            continue;
-        }
-
-        ast_node_t *node = ast_parse_statement(&parser);
-        if (!node || parser.error) break;
-        ast_dump_node(node, 0);
-
-        if (parser.current.type == TOK_NEWLINE) ast_next(&parser);
-        else if (parser.current.type != TOK_EOF) parser.error = 1;
-    }
-
-    if (parser.error) {
+    ast_node_t *program = ast_parse_program(source ? source : "", &parser);
+    if (!program || parser.error) {
         fprintf(stderr, "pythont: AST parse error near %zu:%zu ('%s')\n",
                 parser.current.line, parser.current.column, parser.current.text);
         return 1;
+    }
+    ast_dump_node(program, 0);
+    return 0;
+}
+
+/* Modern AST -> C backend.  This deliberately starts with scalar C values and * structured control flow; unsupported dynamic objects can continue through
+ * the legacy backend until their AST lowering is implemented. */
+typedef struct {
+    char *buf;
+    size_t cap;
+    size_t pos;
+    int indent;
+    int error;
+} ast_cgen_t;
+
+static int ast_cgen_append(ast_cgen_t *g, const char *fmt, ...) {
+    if (g->error) return 0;
+    va_list ap;
+    va_start(ap, fmt);
+    int need = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (need < 0 || g->pos + (size_t)need + 1 >= g->cap) { g->error = 1; return 0; }
+    va_start(ap, fmt);
+    vsnprintf(g->buf + g->pos, g->cap - g->pos, fmt, ap);
+    va_end(ap);
+    g->pos += (size_t)need;
+    return 1;
+}
+
+static void ast_cgen_indent(ast_cgen_t *g) {
+    for (int i = 0; i < g->indent; ++i) ast_cgen_append(g, "    ");
+}
+
+static int ast_cgen_string_literal(ast_cgen_t *g, const char *s) {
+    if (!ast_cgen_append(g, "\"")) return 0;
+    for (size_t i = 0; s[i]; ++i) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '\\' || c == '"') ast_cgen_append(g, "\\%c", c);
+        else if (c == '\n') ast_cgen_append(g, "\\n");
+        else if (c == '\r') ast_cgen_append(g, "\\r");
+        else if (c == '\t') ast_cgen_append(g, "\\t");
+        else ast_cgen_append(g, "%c", c);
+    }
+    return ast_cgen_append(g, "\"");
+}
+
+static int ast_cgen_expr(ast_cgen_t *g, const ast_node_t *n);
+
+static int ast_cgen_expr(ast_cgen_t *g, const ast_node_t *n) {
+    if (!n) return ast_cgen_append(g, "0");
+    switch (n->kind) {
+        case AST_NUMBER: return ast_cgen_append(g, "%s", n->text);
+        case AST_STRING: return ast_cgen_string_literal(g, n->text);
+        case AST_IDENTIFIER:
+            if (!strcmp(n->text, "True")) return ast_cgen_append(g, "1");
+            if (!strcmp(n->text, "False") || !strcmp(n->text, "None")) return ast_cgen_append(g, "0");
+            return ast_cgen_append(g, "%s", n->text);
+        case AST_UNARY:
+            if (!strcmp(n->text, "not")) { ast_cgen_append(g, "(!("); ast_cgen_expr(g, n->left); return ast_cgen_append(g, "))"); }
+            ast_cgen_append(g, "(%s", n->text); ast_cgen_expr(g, n->left); return ast_cgen_append(g, ")");
+        case AST_BINARY:
+            if (!strcmp(n->text, "and")) { ast_cgen_append(g, "("); ast_cgen_expr(g,n->left); ast_cgen_append(g," && "); ast_cgen_expr(g,n->right); return ast_cgen_append(g,")"); }
+            if (!strcmp(n->text, "or")) { ast_cgen_append(g, "("); ast_cgen_expr(g,n->left); ast_cgen_append(g," || "); ast_cgen_expr(g,n->right); return ast_cgen_append(g,")"); }
+            if (!strcmp(n->text, "//")) { ast_cgen_append(g, "((long long)("); ast_cgen_expr(g,n->left); ast_cgen_append(g,") / (long long)("); ast_cgen_expr(g,n->right); return ast_cgen_append(g,"))"); }
+            if (!strcmp(n->text, "**")) { ast_cgen_append(g, "pow("); ast_cgen_expr(g,n->left); ast_cgen_append(g,","); ast_cgen_expr(g,n->right); return ast_cgen_append(g,")"); }
+            if (!strcmp(n->text, "in") || !strcmp(n->text, "is")) { ast_cgen_append(g, "("); ast_cgen_expr(g,n->left); ast_cgen_append(g, " == "); ast_cgen_expr(g,n->right); return ast_cgen_append(g,")"); }
+            ast_cgen_append(g, "("); ast_cgen_expr(g,n->left); ast_cgen_append(g," %s ",n->text); ast_cgen_expr(g,n->right); return ast_cgen_append(g,")");
+        case AST_CALL:
+            ast_cgen_expr(g, n->callee);
+            ast_cgen_append(g, "(");
+            for (size_t i=0;i<n->arg_count;i++) { if(i) ast_cgen_append(g, ", "); ast_cgen_expr(g,n->args[i]); }
+            return ast_cgen_append(g, ")");
+        case AST_INDEX:
+            ast_cgen_expr(g,n->left); ast_cgen_append(g,"["); ast_cgen_expr(g,n->right); return ast_cgen_append(g,"]");
+        case AST_MEMBER:
+            ast_cgen_expr(g,n->left); return ast_cgen_append(g,".%s",n->text);
+        default:
+            g->error = 1;
+            return 0;
+    }
+}
+
+static void ast_cgen_block(ast_cgen_t *g, const ast_node_t *block);
+static void ast_cgen_stmt(ast_cgen_t *g, const ast_node_t *n);
+
+static void ast_cgen_function(ast_cgen_t *g, const ast_node_t *fn) {
+    if (!fn || fn->kind != AST_FUNCTION) return;
+    ast_cgen_append(g, "static int64_t %s(", fn->text);
+    for (size_t i = 0; i < fn->arg_count; ++i) {
+        if (i) ast_cgen_append(g, ", ");
+        ast_cgen_append(g, "int64_t %s", fn->args[i]->text);
+    }
+    ast_cgen_append(g, ") {\n");
+    g->indent = 1;
+    ast_cgen_block(g, fn->body);
+    ast_cgen_indent(g);
+    ast_cgen_append(g, "return 0;\n}\n\n");
+    g->indent = 0;
+}
+
+static void ast_cgen_stmt(ast_cgen_t *g, const ast_node_t *n) {
+    if (!n || g->error) return;
+    ast_cgen_indent(g);
+    switch (n->kind) {
+        case AST_EXPR_STMT:
+            if (n->left && n->left->kind == AST_ASSIGN) {
+                ast_cgen_expr(g,n->left->left); ast_cgen_append(g," %s ",n->left->text); ast_cgen_expr(g,n->left->right); ast_cgen_append(g,";\n");
+            } else if (n->left && n->left->kind == AST_CALL && n->left->callee && n->left->callee->kind == AST_IDENTIFIER && !strcmp(n->left->callee->text,"print")) {
+                ast_cgen_append(g, "printf(\"");
+                for (size_t i=0;i<n->left->arg_count;i++) {
+                    if (i) ast_cgen_append(g, " ");
+                    const ast_node_t *a=n->left->args[i];
+                    if (a->kind == AST_STRING) { ast_cgen_append(g,"%%s"); }
+                    else { ast_cgen_append(g,"%%lld"); }
+                }
+                ast_cgen_append(g, "\\n\"");
+                for (size_t i=0;i<n->left->arg_count;i++) { ast_cgen_append(g, ", "); ast_cgen_expr(g,n->left->args[i]); }
+                ast_cgen_append(g, ");\n");
+            } else { ast_cgen_expr(g,n->left); ast_cgen_append(g,";\n"); }
+            break;
+        case AST_ASSIGN:
+            ast_cgen_expr(g,n->left); ast_cgen_append(g," %s ",n->text); ast_cgen_expr(g,n->right); ast_cgen_append(g,";\n");
+            break;
+        case AST_IF:
+            ast_cgen_append(g,"if ("); ast_cgen_expr(g,n->left); ast_cgen_append(g,") {\n"); g->indent++; ast_cgen_block(g,n->body); g->indent--; ast_cgen_indent(g); ast_cgen_append(g,"}");
+            if (n->else_body) { ast_cgen_append(g," else {\n"); g->indent++; ast_cgen_block(g,n->else_body); g->indent--; ast_cgen_indent(g); ast_cgen_append(g,"}"); }
+            ast_cgen_append(g,"\n");
+            break;
+        case AST_WHILE:
+            ast_cgen_append(g,"while ("); ast_cgen_expr(g,n->left); ast_cgen_append(g,") {\n"); g->indent++; ast_cgen_block(g,n->body); g->indent--; ast_cgen_indent(g); ast_cgen_append(g,"}\n");
+            break;
+        case AST_FOR:
+            if (n->right && n->right->kind == AST_CALL && n->right->callee && n->right->callee->kind == AST_IDENTIFIER && !strcmp(n->right->callee->text,"range")) {
+                ast_cgen_append(g,"for (int64_t %s = ",n->left->text);
+                if (n->right->arg_count == 1) ast_cgen_append(g,"0; %s < ",n->left->text);
+                else { ast_cgen_expr(g,n->right->args[0]); ast_cgen_append(g,"; %s < ",n->left->text); }
+                if (n->right->arg_count == 1) ast_cgen_expr(g,n->right->args[0]); else ast_cgen_expr(g,n->right->args[1]);
+                ast_cgen_append(g,"; %s++) {\n",n->left->text);
+                g->indent++; ast_cgen_block(g,n->body); g->indent--; ast_cgen_indent(g); ast_cgen_append(g,"}\n");
+            } else { g->error=1; }
+            break;
+        case AST_RETURN:
+            ast_cgen_append(g,"return"); if(n->left){ast_cgen_append(g," ");ast_cgen_expr(g,n->left);} ast_cgen_append(g,";\n");
+            break;
+        case AST_BREAK: ast_cgen_append(g,"break;\n"); break;
+        case AST_CONTINUE: ast_cgen_append(g,"continue;\n"); break;
+        case AST_PASS: ast_cgen_append(g,";\n"); break;
+        default: g->error=1; break;
+    }
+}
+
+static void ast_cgen_block(ast_cgen_t *g, const ast_node_t *block) {
+    if (!block) return;
+    for (const ast_node_t *n = block->next; n; n = n->next) {
+        if (n->kind == AST_FUNCTION) continue;
+        ast_cgen_stmt(g,n);
+    }
+}
+
+static void ast_cgen_collect_globals(const ast_node_t *n, char names[][64], size_t *count) {
+    if (!n || *count >= 512) return;
+    const ast_node_t *assign = n;
+    if (n->kind == AST_EXPR_STMT) assign = n->left;
+    if (assign && assign->kind == AST_ASSIGN && assign->left && assign->left->kind == AST_IDENTIFIER) {
+        for (size_t i=0;i<*count;i++) if (!strcmp(names[i],assign->left->text)) return;
+        snprintf(names[(*count)++],64,"%.*s",63,assign->left->text);
+    }
+    if (n->kind == AST_PROGRAM || n->kind == AST_BLOCK) for (const ast_node_t *x=n->next;x;x=x->next) ast_cgen_collect_globals(x,names,count);
+    else if (n->kind == AST_IF || n->kind == AST_WHILE || n->kind == AST_FOR) { ast_cgen_collect_globals(n->body,names,count); ast_cgen_collect_globals(n->else_body,names,count); }
+}
+
+static int ast_emit_c_source(const ast_node_t *program, char **out_code) {
+    size_t cap = 1024 * 1024;
+    char *buf = calloc(1, cap);
+    if (!buf) return 1;
+    ast_cgen_t g = { buf, cap, 0, 0, 0 };
+    ast_cgen_append(&g, "#include <stdio.h>\n#include <stdint.h>\n#include <math.h>\n\n");
+    for (const ast_node_t *n = program ? program->next : NULL; n; n = n->next) {
+        if (n->kind == AST_FUNCTION) ast_cgen_function(&g, n);
+    }
+    ast_cgen_append(&g, "int main(void) {\n");
+    char names[512][64]; size_t count=0;
+    ast_cgen_collect_globals(program,names,&count);
+    for(size_t i=0;i<count;i++) ast_cgen_append(&g,"    int64_t %s = 0;\n",names[i]);
+    g.indent=1;
+    ast_cgen_block(&g, program);
+    ast_cgen_append(&g,"    return 0;\n}\n");
+    if (g.error) { free(buf); return 1; }
+    *out_code = buf;
+    return 0;
+}
+
+static int ast_compile_source(const char *source, char **out_code) {
+    ast_parser_t parser;
+    ast_node_t *program = ast_parse_program(source ? source : "", &parser);
+    if (!program || parser.error) {
+        fprintf(stderr, "pythont: modern AST parse error near %zu:%zu ('%s')\n",
+                parser.current.line, parser.current.column, parser.current.text);
+        return 1;
+    }
+    if (ast_emit_c_source(program, out_code) != 0) {
+        fprintf(stderr, "pythont: modern AST backend does not support this program yet\n");
+        return 2;
     }
     return 0;
 }
@@ -989,7 +1278,8 @@ static void print_help(void) {
     printf("  pythont -e \"<CODIGO_PYTHON>\"     (Executa expressao Python inline)\n");
     printf("  pythont <SCRIPT.py> -c, --emit-c (Apenas exibe o codigo C gerado)\n");
     printf("  pythont <SCRIPT.py> -o <BINARIO> (Gera executavel nativo permanente)\n");
-    printf("  pythont --help                   (Exibe este guia formatado)\n\n");
+    printf("  pythont --help                   (Exibe este guia formatado)\n");
+    printf("  pythont --legacy <SCRIPT.py>     (Forca o backend transpiler legado)\n\n");
     printf("Principais Recursos (1.0-release):\n");
     printf("  • %sList Comprehensions%s        : dobros = [x * 2 for x in nums if x %% 2 == 0]\n", COLOR_OK, COLOR_RESET);
     printf("  • %sContext Managers (with)%s    : with open(\"arq.txt\", \"w\") as f: f.write(\"...\")\n", COLOR_OK, COLOR_RESET);
@@ -1706,8 +1996,7 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
             arg_cnt++;
         } else {
             if (*p == '%') {
-                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%%")) return;
-            } else {
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%%")) return;            } else {
                 char ch[2] = { *p, '\0' };
                 if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), ch)) return;
             }
@@ -2508,18 +2797,33 @@ static void run_interactive_repl(void) {
     }
 }
 
+static char *read_source_file(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return NULL;
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return NULL; }
+    long size = ftell(fp);
+    if (size < 0 || (size_t)size >= MAX_CODE_SZ) { fclose(fp); return NULL; }
+    rewind(fp);
+    char *source = malloc((size_t)size + 1);
+    if (!source) { fclose(fp); return NULL; }
+    size_t n = fread(source, 1, (size_t)size, fp);
+    fclose(fp);
+    source[n] = '\0';
+    return source;
+}
+
 int main(int argc, char *argv[]) {
 
     if (argc < 2) {
         if (isatty(STDIN_FILENO)) {
             run_interactive_repl();
-            return 0;
+                        return 0;
         }
     }
 
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
-        return 0;
+                return 0;
     }
 
     const char *py_file = NULL;
@@ -2528,12 +2832,14 @@ int main(int argc, char *argv[]) {
     int emit_c_only = 0;
     int dump_tokens = 0;
     int dump_ast = 0;
+    int legacy_mode = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) inline_code = argv[++i];
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-c") == 0) emit_c_only = 1;
         else if (strcmp(argv[i], "--tokens") == 0) dump_tokens = 1;
         else if (strcmp(argv[i], "--ast") == 0) dump_ast = 1;
+        else if (strcmp(argv[i], "--legacy") == 0) legacy_mode = 1;
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) out_bin = argv[++i];
         else if (!py_file && !inline_code) py_file = argv[i];
     }
@@ -2547,23 +2853,23 @@ int main(int argc, char *argv[]) {
             if (!fp) {
                 fprintf(stderr, "pythont: erro ao abrir '%s': %s\\n",
                         py_file, strerror(errno));
-                return 1;
+                                return 1;
             }
             if (fseek(fp, 0, SEEK_END) != 0) {
                 fclose(fp);
-                return 1;
+                                return 1;
             }
             long size = ftell(fp);
             if (size < 0 || (size_t)size >= MAX_CODE_SZ) {
                 fclose(fp);
                 fprintf(stderr, "pythont: arquivo grande demais para AST\\n");
-                return 1;
+                                return 1;
             }
             rewind(fp);
             source_copy = malloc((size_t)size + 1);
             if (!source_copy) {
                 fclose(fp);
-                return 1;
+                                return 1;
             }
             size_t read_size = fread(source_copy, 1, (size_t)size, fp);
             fclose(fp);
@@ -2573,7 +2879,7 @@ int main(int argc, char *argv[]) {
 
         int ast_result = ast_dump_source(source ? source : "");
         free(source_copy);
-        return ast_result;
+                return ast_result;
     }
 
     if (dump_tokens) {
@@ -2584,19 +2890,19 @@ int main(int argc, char *argv[]) {
             if (!fp) {
                 fprintf(stderr, "pythont: erro ao abrir '%s': %s\\n",
                         py_file, strerror(errno));
-                return 1;
+                                return 1;
             }
 
             if (fseek(fp, 0, SEEK_END) != 0) {
                 fclose(fp);
-                return 1;
+                                return 1;
             }
 
             long size = ftell(fp);
             if (size < 0 || (size_t)size >= MAX_CODE_SZ) {
                 fclose(fp);
                 fprintf(stderr, "pythont: arquivo grande demais para tokenizacao\\n");
-                return 1;
+                                return 1;
             }
 
             rewind(fp);
@@ -2604,7 +2910,7 @@ int main(int argc, char *argv[]) {
             if (!source_copy) {
                 fclose(fp);
                 fprintf(stderr, "pythont: memoria insuficiente para tokenizacao\\n");
-                return 1;
+                                return 1;
             }
 
             size_t read_size = fread(source_copy, 1, (size_t)size, fp);
@@ -2616,9 +2922,80 @@ int main(int argc, char *argv[]) {
             lexer_dump(source ? source : "");
         }
 
-        return 0;
+                return 0;
     }
 
+    /* Modern pipeline is the default. Unsupported AST constructs fall back to
+     * the mature line-based backend; --legacy forces that backend explicitly. */
+    if (!legacy_mode) {
+        char *modern_source = NULL;
+        if (inline_code) modern_source = strdup(inline_code);
+        else if (py_file) modern_source = read_source_file(py_file);
+
+        if (!modern_source) {
+            fprintf(stderr, "pythont: falha ao carregar fonte para o pipeline AST\n");
+                        return 1;
+        }
+
+        char *modern_c = NULL;
+        int modern_result = ast_compile_source(modern_source, &modern_c);
+        free(modern_source);
+
+        if (modern_result == 0 && modern_c) {
+            if (emit_c_only) {
+                fputs(modern_c, stdout);
+                free(modern_c);
+                                return 0;
+            }
+
+            const char *tmp_dir = get_tmp_dir();
+            char tmp_c_path[512];
+            int n = snprintf(tmp_c_path, sizeof(tmp_c_path), "%s/pythont_ast_%d.c", tmp_dir, getpid());
+            if (n < 0 || (size_t)n >= sizeof(tmp_c_path)) {
+                free(modern_c); return 1;
+            }
+            FILE *mfp = fopen(tmp_c_path, "w");
+            if (!mfp) {
+                fprintf(stderr, "pythont: falha ao criar C do pipeline AST\n");
+                free(modern_c); return 1;
+            }
+            fputs(modern_c, mfp);
+            fclose(mfp);
+
+            char bin_path[512];
+            int run_after = 0;
+            if (out_bin) {
+                if (strlen(out_bin) >= sizeof(bin_path)) { unlink(tmp_c_path); free(modern_c); return 1; }
+                snprintf(bin_path, sizeof(bin_path), "%s", out_bin);
+            } else {
+                n = snprintf(bin_path, sizeof(bin_path), "%s/pythont_ast_bin_%d", tmp_dir, getpid());
+                if (n < 0 || (size_t)n >= sizeof(bin_path)) { unlink(tmp_c_path); free(modern_c); return 1; }
+                run_after = 1;
+            }
+
+            char *ast_gcc_args[] = { "gcc", "-Wno-unused-function", "-Wno-unused-variable", "-O2", tmp_c_path, "-o", bin_path, "-lm", NULL };
+            int ast_comp_res = run_process("gcc", ast_gcc_args);
+            unlink(tmp_c_path);
+            free(modern_c);
+            if (ast_comp_res != 0) {
+                fprintf(stderr, "pythont: erro de compilacao no backend AST; tentando legacy\n");
+            } else if (run_after) {
+                char *run_args[] = { bin_path, NULL };
+                int ret = run_process(bin_path, run_args);
+                unlink(bin_path);
+                                if (ret < 0) return 1;
+                if (WIFEXITED(ret)) return WEXITSTATUS(ret);
+                if (WIFSIGNALED(ret)) return 128 + WTERMSIG(ret);
+                return 1;
+            } else {
+                printf("  \033[1;32m[✔ AST][0m Binario nativo C gerado em: \033[1;36m%s\033[0m\n", bin_path);
+                                return 0;
+            }
+        }
+        if (modern_result == 1) {
+            fprintf(stderr, "pythont: AST nao aceitou o programa; usando backend legacy\n");
+        }
+    }
     if (inline_code) {
         char *code_copy = strdup(inline_code);
         char *saveptr = NULL;
@@ -2632,7 +3009,7 @@ int main(int argc, char *argv[]) {
         FILE *fp = fopen(py_file, "r");
         if (!fp) {
             fprintf(stderr, "pythont: erro ao abrir '%s': %s\n", py_file, strerror(errno));
-            return 1;
+                        return 1;
         }
 
         char line_raw[1024];
@@ -2673,16 +3050,16 @@ int main(int argc, char *argv[]) {
             if (needed > sizeof(accum)) {
                 fprintf(stderr, "pythont: logical Python line exceeds 4095 characters\n");
                 fclose(fp);
-                return 1;
+                                return 1;
             }
             size_t accum_pos = strlen(accum);
             if (accum[0] != '\0' && !append_fragment(accum, &accum_pos, sizeof(accum), " ")) {
                 fclose(fp);
-                return 1;
+                                return 1;
             }
             if (!append_fragment(accum, &accum_pos, sizeof(accum), trimmed)) {
                 fclose(fp);
-                return 1;
+                                return 1;
             }
 
             if (open_braces == 0 && open_brackets == 0 && open_parens == 0) {
@@ -2694,7 +3071,7 @@ int main(int argc, char *argv[]) {
         fclose(fp);
     } else {
         print_help();
-        return 1;
+                return 1;
     }
 
     handle_dedent(0, 0);
@@ -2731,7 +3108,7 @@ int main(int argc, char *argv[]) {
                                "    %s %s = {0};\n", symbols[i].class_type, symbols[i].name);
 
         if (!ok) {
-            return 1;
+                        return 1;
         }
     }
 
@@ -3005,12 +3382,12 @@ int main(int argc, char *argv[]) {
         "    return 0;\n"
         "}\n",
         class_struct_buffer, func_buffer, var_decl_buf, main_buffer)) {
-        return 1;
+                return 1;
     }
 
     if (emit_c_only) {
         printf("%s\n", final_c_code);
-        return 0;
+                return 0;
     }
 
     const char *tmp_dir = get_tmp_dir();
@@ -3019,7 +3396,7 @@ int main(int argc, char *argv[]) {
         "%s/pythont_%d.c", tmp_dir, getpid());
     if (tmp_path_written < 0 || (size_t)tmp_path_written >= sizeof(tmp_c_path)) {
         fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
-        return 1;
+                return 1;
     }
 
     FILE *c_fp = fopen(tmp_c_path, "w");
@@ -3028,13 +3405,13 @@ int main(int argc, char *argv[]) {
             "pythont_%d.c", getpid());
         if (fallback_written < 0 || (size_t)fallback_written >= sizeof(tmp_c_path)) {
             fprintf(stderr, "pythont: caminho temporario excedeu o limite\n");
-            return 1;
+                        return 1;
         }
         c_fp = fopen(tmp_c_path, "w");
     }
     if (!c_fp) {
         fprintf(stderr, "pythont: falha ao criar arquivo C temporario\n");
-        return 1;
+                return 1;
     }
     fputs(final_c_code, c_fp);
     fclose(c_fp);
@@ -3047,7 +3424,7 @@ int main(int argc, char *argv[]) {
         if (out_bin_len >= sizeof(bin_path)) {
             fprintf(stderr, "pythont: caminho do binario excede o limite\n");
             unlink(tmp_c_path);
-            return 1;
+                        return 1;
         }
         memcpy(bin_path, out_bin, out_bin_len + 1);
     } else {
@@ -3056,7 +3433,7 @@ int main(int argc, char *argv[]) {
         if (bin_path_written < 0 || (size_t)bin_path_written >= sizeof(bin_path)) {
             fprintf(stderr, "pythont: caminho do binario excede o limite\n");
             unlink(tmp_c_path);
-            return 1;
+                        return 1;
         }
         run_after = 1;
     }
@@ -3070,14 +3447,14 @@ int main(int argc, char *argv[]) {
 
     if (comp_res != 0) {
         fprintf(stderr, "pythont: erro de compilacao do codigo C gerado\n");
-        return 1;
+                return 1;
     }
 
     if (run_after) {
         char *run_args[] = { bin_path, NULL };
         int ret = run_process(bin_path, run_args);
         unlink(bin_path);
-
+        
         if (ret < 0) return 1;
         if (WIFEXITED(ret)) return WEXITSTATUS(ret);
         if (WIFSIGNALED(ret)) return 128 + WTERMSIG(ret);
@@ -3086,5 +3463,5 @@ int main(int argc, char *argv[]) {
         printf("  \033[1;32m[✔ SUCESSO]\033[0m Binario nativo C gerado em: \033[1;36m%s\033[0m\n", bin_path);
     }
 
-    return 0;
+        return 0;
 }
