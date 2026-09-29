@@ -1039,7 +1039,65 @@ static int ast_cgen_string_literal(ast_cgen_t *g, const char *s) {
     return ast_cgen_append(g, "\"");
 }
 
-static int ast_cgen_expr(ast_cgen_t *g, const ast_node_t *n);
+static int ast_cgen_requires_legacy_expr(const ast_node_t *n) {
+    if (!n) return 0;
+    switch (n->kind) {
+        case AST_LIST:
+        case AST_TUPLE:
+        case AST_DICT:
+        case AST_INDEX:
+        case AST_SLICE:
+        case AST_MEMBER:
+            return 1;
+        case AST_UNARY:
+            return ast_cgen_requires_legacy_expr(n->left);
+        case AST_BINARY:
+            return ast_cgen_requires_legacy_expr(n->left) || ast_cgen_requires_legacy_expr(n->right);
+        case AST_CALL:
+            if (ast_cgen_requires_legacy_expr(n->callee)) return 1;
+            for (size_t i = 0; i < n->arg_count; ++i)
+                if (ast_cgen_requires_legacy_expr(n->args[i])) return 1;
+            return 0;
+        case AST_ASSIGN:
+            /* The scalar AST backend does not own string/object storage yet.
+             * Keep string assignments in legacy instead of emitting an
+             * invalid int64_t <- char * conversion. */
+            if (n->right && n->right->kind == AST_STRING) return 1;
+            return ast_cgen_requires_legacy_expr(n->left) || ast_cgen_requires_legacy_expr(n->right);
+        default:
+            return 0;
+    }
+}
+
+static int ast_cgen_requires_legacy_stmt(const ast_node_t *n) {
+    if (!n) return 0;
+    switch (n->kind) {
+        case AST_EXPR_STMT:
+            return ast_cgen_requires_legacy_expr(n->left);
+        case AST_ASSIGN:
+            return ast_cgen_requires_legacy_expr(n);
+        case AST_RETURN:
+            return ast_cgen_requires_legacy_expr(n->left);
+        case AST_IF:
+        case AST_WHILE:
+            return ast_cgen_requires_legacy_expr(n->left) ||
+                   ast_cgen_requires_legacy_stmt(n->body) ||
+                   ast_cgen_requires_legacy_stmt(n->else_body);
+        case AST_FOR:
+            return ast_cgen_requires_legacy_expr(n->right) ||
+                   ast_cgen_requires_legacy_stmt(n->body) ||
+                   ast_cgen_requires_legacy_stmt(n->else_body);
+        case AST_BLOCK:
+        case AST_PROGRAM:
+            for (const ast_node_t *x = n->next; x; x = x->next)
+                if (ast_cgen_requires_legacy_stmt(x)) return 1;
+            return 0;
+        case AST_FUNCTION:
+            return ast_cgen_requires_legacy_stmt(n->body);
+        default:
+            return 0;
+    }
+}
 
 static int ast_cgen_expr(ast_cgen_t *g, const ast_node_t *n) {
     if (!n) return ast_cgen_append(g, "0");
@@ -1193,8 +1251,14 @@ static int ast_compile_source(const char *source, char **out_code) {
                 parser.current.line, parser.current.column, parser.current.text);
         return 1;
     }
+    /* Never emit C that is known to be invalid. Dynamic objects such as
+     * lists/dicts/indexing still belong to the mature legacy backend until
+     * their native lowering is implemented. */
+    if (ast_cgen_requires_legacy_stmt(program)) {
+        return 2;
+    }
     if (ast_emit_c_source(program, out_code) != 0) {
-        fprintf(stderr, "pythont: modern AST backend does not support this program yet\n");
+        fprintf(stderr, "pythont: modern AST backend failed while generating C\n");
         return 2;
     }
     return 0;
@@ -2078,6 +2142,18 @@ static void transpile_print(const char *args_str) {
         transform_advanced_expressions(t);
 
         symbol_t *sym = find_symbol(t);
+
+        if (sym && sym->type == VAR_DICT) {
+            if (!append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), "%s")) return;
+            if (!first && strlen(val_list) > 0 &&
+                !append_fragment(val_list, &val_pos, sizeof(val_list), ", ")) return;
+            char dict_repr_call[2100];
+            int n = snprintf(dict_repr_call, sizeof(dict_repr_call), "py_dict_repr(&%s)", t);
+            if (n < 0 || (size_t)n >= sizeof(dict_repr_call) ||
+                !append_fragment(val_list, &val_pos, sizeof(val_list), dict_repr_call)) return;
+            first = 0;
+            continue;
+        }
 
         if (sym && sym->type == VAR_LIST) {
             if (!append_fragment(fmt_str, &fmt_pos, sizeof(fmt_str), "%s")) return;
@@ -2996,6 +3072,8 @@ int main(int argc, char *argv[]) {
         }
         if (modern_result == 1) {
             fprintf(stderr, "pythont: AST nao aceitou o programa; usando backend legacy\n");
+        } else if (modern_result == 2) {
+            fprintf(stderr, "pythont: backend AST delegou recursos dinamicos ao legacy\n");
         }
     }
 
@@ -3363,6 +3441,18 @@ int main(int argc, char *argv[]) {
         "        }\n"
         "    }\n"
         "    strcat(k_buf, \"]\"); return k_buf;\n"
+        "}\n"
+        "__attribute__((unused)) static inline const char *py_dict_repr(const py_dict_t *d) {\n"
+        "    static char r_buf[4096]; r_buf[0] = '{'; r_buf[1] = '\\0';\n"
+        "    for (int i = 0; i < d->count; i++) {\n"
+        "        if (d->entries[i].used) {\n"
+        "            char tmp[384]; snprintf(tmp, sizeof(tmp), \"'%%s': %%s%%s\", d->entries[i].key, d->entries[i].val, (i < d->count - 1) ? \", \" : \"\");\n"
+        "            size_t r_len = strlen(r_buf), tmp_len = strlen(tmp);\n"
+        "            if (r_len + tmp_len + 2 >= sizeof(r_buf)) return \"{dict too large}\";\n"
+        "            memcpy(r_buf + r_len, tmp, tmp_len + 1);\n"
+        "        }\n"
+        "    }\n"
+        "    strcat(r_buf, \"}\"); return r_buf;\n"
         "}\n"
         "__attribute__((unused)) static inline const char *py_dict_values(const py_dict_t *d) {\n"
         "    static char v_buf[2048]; v_buf[0] = '['; v_buf[1] = '\\0';\n"
