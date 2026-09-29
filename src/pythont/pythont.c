@@ -997,7 +997,8 @@ static int ast_dump_source(const char *source) {
     return 0;
 }
 
-/* Modern AST -> C backend.  This deliberately starts with scalar C values and * structured control flow; unsupported dynamic objects can continue through
+/* Modern AST -> C backend.  This deliberately starts with scalar C values and
+ * structured control flow; unsupported dynamic objects can continue through
  * the legacy backend until their AST lowering is implemented. */
 typedef struct {
     char *buf;
@@ -1996,7 +1997,8 @@ static void transpile_fstring(const char *fstr, char *out_fmt, char *out_args) {
             arg_cnt++;
         } else {
             if (*p == '%') {
-                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%%")) return;            } else {
+                if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), "%%")) return;
+            } else {
                 char ch[2] = { *p, '\0' };
                 if (!append_fragment(fmt_buf, &fmt_pos, sizeof(fmt_buf), ch)) return;
             }
@@ -2996,6 +2998,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "pythont: AST nao aceitou o programa; usando backend legacy\n");
         }
     }
+
     if (inline_code) {
         char *code_copy = strdup(inline_code);
         char *saveptr = NULL;
